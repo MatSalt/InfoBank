@@ -42,7 +42,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
 
   // 브라우저 지원 여부 확인
   useEffect(() => {
-    setIsSupported(!!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.WebSocket));
+    setIsSupported(!!(navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function' && window.WebSocket));
   }, []);
 
   // 오디오 스트림 중지 함수
@@ -53,6 +53,29 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
       audioStreamRef.current = null;
     }
   }, []);
+
+  // 녹음 중지 함수 - 먼저 정의
+  const stopRecording = useCallback((): void => {
+    console.log("녹음 중지 요청됨.");
+    // null 체크 추가
+    if (mediaRecorderRef.current?.state === 'recording') {
+      mediaRecorderRef.current.stop();
+    }
+
+    if (webSocketRef.current?.readyState === WebSocket.OPEN) {
+      webSocketRef.current.close(1000, "Client stopped recording");
+      console.log("WebSocket 연결 종료 요청됨.");
+    } else {
+      // WebSocket이 없거나 이미 닫혔으면 스트림만 정리
+      stopAudioStream();
+    }
+
+    // 상태 업데이트는 onclose 핸들러 또는 여기서 직접 수행
+    setIsRecording(false);
+    setStatusMessage('버튼을 누르고 말씀하세요.');
+    mediaRecorderRef.current = null;
+    // webSocketRef, audioStreamRef는 onclose 또는 stopAudioStream에서 정리됨
+  }, [stopAudioStream]);
 
   // WebSocket 연결 설정 함수
   const setupWebSocket = useCallback((): Promise<WebSocket> => {
@@ -94,7 +117,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
                     // 서버 오류 시 녹음 중지 등 추가 처리 가능
                     stopRecording();
                  }
-             } catch (e) {
+             } catch {
                 console.warn("Received non-JSON string message:", event.data);
                 // 단순 텍스트 응답 처리 (필요한 경우)
                 setTranscript(prev => prev + event.data);
@@ -149,7 +172,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
       let recorder: MediaRecorder;
       try {
         recorder = new MediaRecorder(stream, options);
-      } catch (err) {
+      } catch {
         console.warn("WebM Opus not supported, trying default");
         try {
           recorder = new MediaRecorder(stream);
@@ -183,7 +206,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
       recorder.onerror = (event: Event) => {
         console.error("MediaRecorder 오류:", event);
         // event.error를 직접 사용하기 어려울 수 있음, name으로 구분 시도
-        const errorEvent = event as any; // 타입을 단언하여 name 속성 접근 시도
+        const errorEvent = event as { error?: { name?: string } };
         setErrorMessage(`녹음 중 오류 발생: ${errorEvent.error?.name || 'Unknown error'}`);
         stopRecording(); // 오류 시 녹음 중지 로직 실행
       };
@@ -236,29 +259,6 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
       setStatusMessage('녹음을 시작하지 못했습니다.'); // 최종 실패 메시지
     }
   }, [isRecording, isConnecting, setupAndStartStreaming]);
-
-  // 녹음 중지 함수
-  const stopRecording = useCallback((): void => {
-    console.log("녹음 중지 요청됨.");
-    // null 체크 추가
-    if (mediaRecorderRef.current?.state === 'recording') {
-      mediaRecorderRef.current.stop();
-    }
-
-    if (webSocketRef.current?.readyState === WebSocket.OPEN) {
-      webSocketRef.current.close(1000, "Client stopped recording");
-      console.log("WebSocket 연결 종료 요청됨.");
-    } else {
-      // WebSocket이 없거나 이미 닫혔으면 스트림만 정리
-      stopAudioStream();
-    }
-
-    // 상태 업데이트는 onclose 핸들러 또는 여기서 직접 수행
-    setIsRecording(false);
-    setStatusMessage('버튼을 누르고 말씀하세요.');
-    mediaRecorderRef.current = null;
-    // webSocketRef, audioStreamRef는 onclose 또는 stopAudioStream에서 정리됨
-  }, [stopAudioStream]);
 
   // 컴포넌트 언마운트 시 정리
   useEffect(() => {

@@ -1,6 +1,4 @@
-import React from 'react';
-// .tsx 확장자는 import 시 생략 가능 (모듈 해석 설정에 따라 다름)
-import VoiceChatPage from './pages/VoiceChatPage';
+import VoiceChatPage from './pages/voiceChatPage.tsx';
 // CSS 파일 임포트
 import './index.css'; // Tailwind CSS가 포함된 메인 CSS 파일 임포트 (경로 확인 필요)
 

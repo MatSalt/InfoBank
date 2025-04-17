@@ -21,7 +21,7 @@ export default function VoiceChatPage() { // 간단한 함수 선언 방식 사�
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-purple-100 to-purple-300 font-sans p-4">
       <div className="w-full max-w-md p-6 bg-white rounded-xl shadow-lg text-center">
-        <h1 className="text-2xl font-bold mb-4 text-gray-800">AI 음성 대화 (실시간 스트리밍)</h1>
+        <h1 className="text-2xl font-bold mb-4 text-gray-800">AI 음성 대화</h1>
 
         {/* 브라우저 지원 여부 메시지 */}
         {!isSupported && (
