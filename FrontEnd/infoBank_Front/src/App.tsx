@@ -1,35 +1,17 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import React from 'react';
+// .tsx 확장자는 import 시 생략 가능 (모듈 해석 설정에 따라 다름)
+import VoiceChatPage from './pages/VoiceChatPage';
+// CSS 파일 임포트
+import './index.css'; // Tailwind CSS가 포함된 메인 CSS 파일 임포트 (경로 확인 필요)
 
-function App() {
-  const [count, setCount] = useState(0)
-
+// function App(): JSX.Element { // 반환 타입 명시적 지정 가능
+function App() { // 간단한 함수 선언 방식 사용
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
+    <div className="App">
+      <VoiceChatPage />
+      {/* 향후 라우팅 등이 필요하면 여기에 추가 */}
+    </div>
+  );
 }
 
-export default App
+export default App;
