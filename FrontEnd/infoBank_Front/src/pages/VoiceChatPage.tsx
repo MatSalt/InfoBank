@@ -1,4 +1,3 @@
-import React from 'react';
 // 커스텀 훅 임포트 (useVoiceStreaming.ts 파일로부터)
 import { useVoiceStreaming } from '../hooks/useVoiceStreaming';
 
