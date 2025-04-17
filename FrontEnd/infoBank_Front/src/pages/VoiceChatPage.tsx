@@ -19,7 +19,7 @@ export default function VoiceChatPage() { // 간단한 함수 선언 방식 사�
 
   // JSX 반환 (타입: JSX.Element)
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-purple-100 to-purple-300 font-sans p-4">
+    <div className="flex flex-col items-center justify-center w-full h-full min-h-screen bg-gradient-to-b from-purple-100 to-purple-300 font-sans p-4">
       <div className="w-full max-w-md p-6 bg-white rounded-xl shadow-lg text-center">
         <h1 className="text-2xl font-bold mb-4 text-gray-800">AI 음성 대화</h1>
 
@@ -40,7 +40,7 @@ export default function VoiceChatPage() { // 간단한 함수 선언 방식 사�
           className={`w-full px-6 py-4 rounded-lg text-white font-semibold shadow-md transition-all duration-300 ease-in-out ${
             isRecording
               ? 'bg-red-500 hover:bg-red-600 animate-pulse' // 녹음 중일 때 빨간색 및 애니메이션
-              : 'bg-purple-500 hover:bg-purple-600' // 기본 상태 보라색
+              : 'bg-purple-600 hover:bg-purple-700' // 기본 상태 보라색
           } ${(!isSupported || isConnecting) ? 'opacity-50 cursor-not-allowed' : ''}`} // 비활성화 스타일
         >
           {isRecording ? '🔴 녹음 중지' : (isConnecting ? '연결 중...' : '🎤 녹음 시작')}
@@ -48,20 +48,19 @@ export default function VoiceChatPage() { // 간단한 함수 선언 방식 사�
 
         {/* 인식된 텍스트 표시 영역 */}
         {transcript && (
-          <div className="mt-6 p-4 bg-gray-100 rounded-lg shadow-inner min-h-[50px]">
-            <p className="text-gray-800 break-words">{transcript}</p>
+          <div className="mt-6 p-4 bg-gray-50 rounded-lg text-left">
+            <h2 className="text-lg font-semibold mb-2 text-gray-700">인식된 텍스트:</h2>
+            <p className="text-gray-600 whitespace-pre-wrap">{transcript}</p>
           </div>
         )}
 
         {/* 오류 메시지 표시 */}
         {errorMessage && (
-          <p className="mt-4 text-red-600 bg-red-100 p-3 rounded-lg">
-            {errorMessage}
-          </p>
+          <div className="mt-4 p-3 bg-red-100 text-red-600 rounded-lg">
+            <p>⚠️ {errorMessage}</p>
+          </div>
         )}
-
       </div>
-       {/* Tailwind CSS는 일반적으로 index.html 또는 메인 CSS 파일에서 로드됩니다. */}
     </div>
   );
 }
