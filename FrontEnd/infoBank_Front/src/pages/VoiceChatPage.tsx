@@ -43,7 +43,7 @@ export default function VoiceChatPage() { // 간단한 함수 선언 방식 사�
               : 'bg-purple-600 hover:bg-purple-700' // 기본 상태 보라색
           } ${(!isSupported || isConnecting) ? 'opacity-50 cursor-not-allowed' : ''}`} // 비활성화 스타일
         >
-          {isRecording ? '🔴 녹음 중지' : (isConnecting ? '연결 중...' : '🎤 녹음 시작')}
+          {isRecording ? '🔴 녹음 중지' : (isConnecting ? '연결 중...' : '🎤 대화 시작')}
         </button>
 
         {/* 인식된 텍스트 표시 영역 */}
