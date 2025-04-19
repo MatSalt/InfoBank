@@ -1,7 +1,7 @@
 # backend/app/routers/voice.py
 import logging
 import asyncio
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, WebSocketState # WebSocketState 임포트
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect # WebSocketState 임포트 제거
 from app.services.stt_service import handle_stt_stream # STT 서비스 함수 임포트
 from app.services.llm_service import stream_llm_response # LLM 서비스 함수 임포트
 from app.services.tts_service import synthesize_speech_stream # TTS 서비스 임포트
@@ -45,7 +45,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
             # 3. 오디오 스트림을 WebSocket으로 전송
             async for audio_chunk in audio_chunk_stream:
-                if ws.client_state == WebSocketState.CONNECTED: # 연결 상태 확인
+                if ws.client_state == "connected": # 연결 상태 확인 (WebSocketState 대신 문자열 사용)
                     await ws.send_bytes(audio_chunk)
                     logger.debug(f"[{client_id}] TTS 오디오 청크 전송됨 ({len(audio_chunk)} bytes)")
                 else:
@@ -59,7 +59,7 @@ async def websocket_endpoint(websocket: WebSocket):
             logger.error(f"[{client_id}] LLM->TTS 파이프라인 처리 중 오류 발생: {e}", exc_info=True)
             # 클라이언트에게 오류 알림 (선택 사항)
             # try:
-            #     if ws.client_state == WebSocketState.CONNECTED:
+            #     if ws.client_state == "connected":
             #         await ws.send_text(f"Error processing response: {e}")
             # except Exception: pass # 오류 전송 실패는 무시
 
@@ -72,7 +72,7 @@ async def websocket_endpoint(websocket: WebSocket):
             logger.debug(f"[{client_info}] 중간 결과: {transcript}")
             # 필요시 중간 결과를 클라이언트에게 전송 (텍스트)
             # try:
-            #     if websocket.client_state == WebSocketState.CONNECTED:
+            #     if websocket.client_state == "connected":
             #         await websocket.send_text(f"중간 인식: {transcript}")
             # except Exception: pass
         else:
@@ -90,7 +90,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 logger.info(f"[{client_info}] 최종 결과가 비어있어 LLM->TTS 파이프라인을 시작하지 않음.")
             # 최종 텍스트 결과를 클라이언트에게 전송할 수도 있음 (디버깅 등 목적)
             # try:
-            #     if websocket.client_state == WebSocketState.CONNECTED:
+            #     if websocket.client_state == "connected":
             #         await websocket.send_text(f"최종 인식: {transcript}")
             # except Exception: pass
 
@@ -104,7 +104,7 @@ async def websocket_endpoint(websocket: WebSocket):
         # --- 클라이언트로부터 오디오 수신 ---
         while True:
             # 연결 상태 확인 후 수신 시도
-            if websocket.client_state != WebSocketState.CONNECTED:
+            if websocket.client_state != "connected": # WebSocketState 대신 문자열 사용
                  logger.warning(f"[{client_info}] WebSocket 연결이 끊어진 상태에서 수신 시도 방지.")
                  break
 
@@ -132,13 +132,13 @@ async def websocket_endpoint(websocket: WebSocket):
          logger.info(f"[{client_info}] WebSocket 핸들러 태스크 취소됨.")
          # 명시적으로 닫기 시도
          try:
-             if websocket.client_state == WebSocketState.CONNECTED:
+             if websocket.client_state == "connected": # WebSocketState 대신 문자열 사용
                  await websocket.close(code=1001, reason="Server shutting down")
          except Exception: pass
     except Exception as e:
         logger.error(f"WebSocket 연결 중 오류 발생 ({client_info}): {e}", exc_info=True)
         try:
-            if websocket.client_state == WebSocketState.CONNECTED:
+            if websocket.client_state == "connected": # WebSocketState 대신 문자열 사용
                 await websocket.close(code=1011, reason=f"Server error: {e}")
         except Exception: pass
     finally:
@@ -191,7 +191,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
         # 4. 웹소켓 연결 닫기 (이미 닫히지 않았다면)
         try:
-            if websocket.client_state == WebSocketState.CONNECTED:
+            if websocket.client_state == "connected": # WebSocketState 대신 문자열 사용
                  logger.info(f"[{client_info}] WebSocket 연결 명시적으로 닫기 시도...")
                  await websocket.close()
                  logger.info(f"[{client_info}] WebSocket 연결 명시적으로 닫힘.")
