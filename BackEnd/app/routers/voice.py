@@ -1,19 +1,19 @@
 # backend/app/routers/voice.py
 import logging
 import asyncio
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect # WebSocketState 임포트 제거
-from app.services.stt_service import handle_stt_stream # STT 서비스 함수 임포트
-from app.services.llm_service import stream_llm_response # LLM 서비스 함수 임포트
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from app.services.stt_service import handle_stt_stream
+from app.services.llm_service import stream_llm_response
 from app.services.tts_service import synthesize_speech_stream # TTS 서비스 임포트
 from typing import Set # Set 타입 임포트
 
-# 로거 설정 (main.py에서 설정된 로거 사용 또는 여기서 별도 설정 가능)
+# 로거 설정
 logger = logging.getLogger(__name__)
 
 # APIRouter 인스턴스 생성
 router = APIRouter(
-    prefix="/ws", # 이 라우터의 모든 경로 앞에 /ws 접두사 추가
-    tags=["voice"], # API 문서에서 태그별로 그룹화
+    prefix="/ws",
+    tags=["voice"],
 )
 
 @router.websocket("/audio")
@@ -21,7 +21,7 @@ async def websocket_endpoint(websocket: WebSocket):
     """
     WebSocket 연결을 처리하고, 오디오 수신 -> STT -> LLM -> TTS -> 오디오 전송 파이프라인을 관리합니다.
     """
-    await websocket.accept() # 클라이언트의 웹소켓 연결 요청 수락
+    await websocket.accept()
     client_host = websocket.client.host
     client_port = websocket.client.port
     client_info = f"{client_host}:{client_port}"
@@ -31,6 +31,9 @@ async def websocket_endpoint(websocket: WebSocket):
     stt_task: asyncio.Task | None = None # STT 처리 태스크
     # LLM 및 TTS 처리를 위한 태스크 집합 (여러 요청 동시 처리 가능성 고려)
     llm_tts_tasks: Set[asyncio.Task] = set()
+    
+    # 연결 상태 플래그
+    is_connected = True
 
     # --- LLM 및 TTS 처리 함수 ---
     async def handle_llm_and_tts(transcript: str, ws: WebSocket, client_id: str):
@@ -45,9 +48,13 @@ async def websocket_endpoint(websocket: WebSocket):
 
             # 3. 오디오 스트림을 WebSocket으로 전송
             async for audio_chunk in audio_chunk_stream:
-                if ws.client_state == "connected": # 연결 상태 확인 (WebSocketState 대신 문자열 사용)
-                    await ws.send_bytes(audio_chunk)
-                    logger.debug(f"[{client_id}] TTS 오디오 청크 전송됨 ({len(audio_chunk)} bytes)")
+                if is_connected: # 연결 상태 플래그 사용
+                    try:
+                        await ws.send_bytes(audio_chunk)
+                        logger.debug(f"[{client_id}] TTS 오디오 청크 전송됨 ({len(audio_chunk)} bytes)")
+                    except Exception as e:
+                        logger.warning(f"[{client_id}] TTS 오디오 청크 전송 중 오류 발생: {e}")
+                        break
                 else:
                     logger.warning(f"[{client_id}] WebSocket 연결이 끊어져 TTS 오디오 전송 중단.")
                     break # 연결 끊겼으면 루프 종료
@@ -59,7 +66,7 @@ async def websocket_endpoint(websocket: WebSocket):
             logger.error(f"[{client_id}] LLM->TTS 파이프라인 처리 중 오류 발생: {e}", exc_info=True)
             # 클라이언트에게 오류 알림 (선택 사항)
             # try:
-            #     if ws.client_state == "connected":
+            #     if is_connected:
             #         await ws.send_text(f"Error processing response: {e}")
             # except Exception: pass # 오류 전송 실패는 무시
 
@@ -72,7 +79,7 @@ async def websocket_endpoint(websocket: WebSocket):
             logger.debug(f"[{client_info}] 중간 결과: {transcript}")
             # 필요시 중간 결과를 클라이언트에게 전송 (텍스트)
             # try:
-            #     if websocket.client_state == "connected":
+            #     if is_connected:
             #         await websocket.send_text(f"중간 인식: {transcript}")
             # except Exception: pass
         else:
@@ -90,7 +97,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 logger.info(f"[{client_info}] 최종 결과가 비어있어 LLM->TTS 파이프라인을 시작하지 않음.")
             # 최종 텍스트 결과를 클라이언트에게 전송할 수도 있음 (디버깅 등 목적)
             # try:
-            #     if websocket.client_state == "connected":
+            #     if is_connected:
             #         await websocket.send_text(f"최종 인식: {transcript}")
             # except Exception: pass
 
@@ -102,44 +109,56 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.info(f"[{client_info}] STT 서비스 태스크 시작됨.")
 
         # --- 클라이언트로부터 오디오 수신 ---
-        while True:
-            # 연결 상태 확인 후 수신 시도
-            if websocket.client_state != "connected": # WebSocketState 대신 문자열 사용
-                 logger.warning(f"[{client_info}] WebSocket 연결이 끊어진 상태에서 수신 시도 방지.")
-                 break
+        while is_connected: # 연결 상태 플래그 사용
+            try:
+                logger.debug(f"[{client_info}] websocket.receive() 호출 대기...")
+                data = await websocket.receive() # 메시지 수신 대기
 
-            data = await websocket.receive() # 클라이언트로부터 메시지 수신 대기
-
-            if "bytes" in data: # 오디오 청크 수신
-                audio_chunk = data["bytes"]
-                if audio_chunk:
-                    logger.debug(f"[{client_info}] 오디오 청크 수신: {len(audio_chunk)} bytes")
-                    await audio_queue.put(audio_chunk)
-                    logger.debug(f"[{client_info}] 오디오 청크를 큐에 추가 완료.")
+                if isinstance(data, dict): # FastAPI는 dict 형태로 반환
+                    if "bytes" in data:
+                        audio_chunk = data["bytes"]
+                        logger.debug(f"[{client_info}] 오디오 청크 수신: {len(audio_chunk)} bytes")
+                        if audio_chunk:
+                            await audio_queue.put(audio_chunk)
+                            logger.debug(f"[{client_info}] 오디오 청크를 큐에 추가 완료.")
+                        else:
+                            logger.debug(f"[{client_info}] 빈 오디오 청크 수신, 무시함.")
+                    elif "text" in data:
+                        text_data = data["text"]
+                        logger.info(f"[{client_info}] 텍스트 메시지 수신: {text_data}")
+                        if text_data.lower() in ["client stopped recording", "disconnect", "stop"]:
+                            logger.info(f"[{client_info}] 클라이언트 중지 신호 수신. 루프 종료.")
+                            break
+                    else:
+                        logger.warning(f"[{client_info}] 예상치 못한 dict 형식 데이터 수신: {data}")
                 else:
-                     logger.debug(f"[{client_info}] 빈 오디오 청크 수신, 무시함.")
+                     logger.warning(f"[{client_info}] 예상치 못한 데이터 형식 수신: {data}")
 
-            elif "text" in data: # 텍스트 메시지 수신
-                text_data = data["text"]
-                logger.info(f"[{client_info}] 텍스트 메시지 수신: {text_data}")
-                if text_data.lower() in ["client stopped recording", "disconnect", "stop"]:
-                    logger.info(f"[{client_info}] 클라이언트가 중지 신호 보냄. 스트림 종료 중.")
-                    break # 오디오 수신 루프 종료
+            except WebSocketDisconnect as e:
+                # receive() 중에 연결이 끊기면 이 예외 발생
+                logger.warning(f"[{client_info}] receive() 대기 중 WebSocket 연결 끊김 감지: 코드 {e.code}, 이유: {e.reason}")
+                is_connected = False
+                break
+            except Exception as e_inner:
+                logger.error(f"[{client_info}] 데이터 수신/처리 중 예외 발생: {e_inner}", exc_info=True)
+                # 필요한 경우 루프를 중단하거나 계속 진행할 수 있음
+                break # 오류 발생 시 루프 중단
 
     except WebSocketDisconnect as e:
-        logger.warning(f"WebSocket 연결 끊김: {client_info} - 코드: {e.code}, 이유: {e.reason}")
+         logger.warning(f"WebSocket 연결 외부 루프에서 끊김 감지: {client_info} - 코드: {e.code}, 이유: {e.reason}")
+         is_connected = False
     except asyncio.CancelledError:
          logger.info(f"[{client_info}] WebSocket 핸들러 태스크 취소됨.")
+         is_connected = False
          # 명시적으로 닫기 시도
          try:
-             if websocket.client_state == "connected": # WebSocketState 대신 문자열 사용
-                 await websocket.close(code=1001, reason="Server shutting down")
+             await websocket.close(code=1001, reason="Server shutting down")
          except Exception: pass
     except Exception as e:
         logger.error(f"WebSocket 연결 중 오류 발생 ({client_info}): {e}", exc_info=True)
+        is_connected = False
         try:
-            if websocket.client_state == "connected": # WebSocketState 대신 문자열 사용
-                await websocket.close(code=1011, reason=f"Server error: {e}")
+            await websocket.close(code=1011, reason=f"Server error: {e}")
         except Exception: pass
     finally:
         logger.info(f"[{client_info}] WebSocket 연결 정리 시작...")
@@ -191,12 +210,12 @@ async def websocket_endpoint(websocket: WebSocket):
 
         # 4. 웹소켓 연결 닫기 (이미 닫히지 않았다면)
         try:
-            if websocket.client_state == "connected": # WebSocketState 대신 문자열 사용
+            if is_connected: # 연결 상태 플래그 사용
                  logger.info(f"[{client_info}] WebSocket 연결 명시적으로 닫기 시도...")
                  await websocket.close()
                  logger.info(f"[{client_info}] WebSocket 연결 명시적으로 닫힘.")
             else:
-                 logger.info(f"[{client_info}] WebSocket 연결이 이미 닫힌 상태({websocket.client_state}).")
+                 logger.info(f"[{client_info}] WebSocket 연결이 이미 닫힌 상태.")
         except Exception as e:
             logger.warning(f"[{client_info}] WebSocket 닫기 중 오류 발생 (이미 닫혔을 수 있음): {e}")
 
