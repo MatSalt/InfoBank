@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     USE_VERTEX_AI: bool = os.getenv("USE_VERTEX_AI", "True").lower() == "true" # 기본값은 True로 설정
     VERTEX_AI_LOCATION: str = os.getenv("VERTEX_AI_LOCATION", "us-central1") # Vertex AI 리전 설정
 
+    # --- TTS (Text-to-Speech) 설정 추가 ---
+    TTS_VOICE_NAME: str = os.getenv("TTS_VOICE_NAME", "ko-KR-Chirp3-HD-Aoede") # 사용할 TTS 음성 이름 (예: ko-KR-Standard-A, ko-KR-Wavenet-A)
+    TTS_LANGUAGE_CODE: str = os.getenv("TTS_LANGUAGE_CODE", "ko-KR") # 사용할 TTS 언어 코드
+
     class Config:
         # .env 파일이 존재하면 로드
         env_file = ".env"
@@ -52,4 +56,9 @@ if not settings.GOOGLE_CLOUD_PROJECT_ID:
     raise ValueError("GOOGLE_CLOUD_PROJECT_ID가 설정되지 않았습니다. 환경 변수나 .env 파일에 설정해주세요.")
 # --- Vertex AI 리전 확인 추가 ---
 if not settings.VERTEX_AI_LOCATION:
-    raise ValueError("VERTEX_AI_LOCATION이 설정되지 않았습니다. 환경 변수나 .env 파일에 설정해주세요.") 
+    raise ValueError("VERTEX_AI_LOCATION이 설정되지 않았습니다. 환경 변수나 .env 파일에 설정해주세요.")
+# --- TTS 설정 확인 추가 ---
+if not settings.TTS_VOICE_NAME:
+    raise ValueError("TTS_VOICE_NAME이 설정되지 않았습니다. 환경 변수나 .env 파일에 설정해주세요.")
+if not settings.TTS_LANGUAGE_CODE:
+    raise ValueError("TTS_LANGUAGE_CODE가 설정되지 않았습니다. 환경 변수나 .env 파일에 설정해주세요.") 
