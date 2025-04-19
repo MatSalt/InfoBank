@@ -1,10 +1,10 @@
 # backend/app/services/llm_service.py
 import logging
 import asyncio
-import google.generativeai as genai
+from google import genai
 # GenerationConfig, SafetySetting 등은 사용하지 않으므로 주석 처리 또는 삭제 가능
-# from google.generativeai.types import GenerationConfig, SafetySetting, HarmCategory
-from google.generativeai.types import HttpOptions # HttpOptions 임포트
+# from google.genai.types import GenerationConfig, SafetySetting, HarmCategory
+from google.genai.types import HttpOptions # HttpOptions 임포트
 from ..core.config import settings # 설정 가져오기 (필요시 다른 설정 사용 가능)
 
 # 로거 설정
