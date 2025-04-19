@@ -3,10 +3,15 @@ import logging
 import asyncio
 from google.cloud import speech_v2 as speech
 from google.cloud.speech_v2.types import cloud_speech
+from google.api_core import exceptions as google_exceptions
 from ..core.config import settings # 설정 가져오기
 
 # 로거 설정
 logger = logging.getLogger(__name__)
+
+class STTTimeoutError(Exception):
+    """Google Cloud STT 스트리밍 타임아웃 시 발생하는 사용자 정의 예외"""
+    pass
 
 # --- STT 설정 ---
 PROJECT_ID = settings.GOOGLE_CLOUD_PROJECT_ID
@@ -48,8 +53,7 @@ async def request_generator(audio_queue: asyncio.Queue, recognizer: str, config:
         logger.info("STT 서비스: 요청 제너레이터 취소됨.")
     except Exception as e:
         logger.error(f"STT 서비스: 요청 제너레이터 오류 발생: {e}", exc_info=True)
-        # 오류를 호출자에게 전파하거나 처리할 수 있음
-        raise # 예외를 다시 발생시켜 호출 스택으로 전파
+        raise
     finally:
         logger.debug("STT 서비스: 요청 제너레이터 완료.")
 
@@ -57,10 +61,7 @@ async def request_generator(audio_queue: asyncio.Queue, recognizer: str, config:
 async def handle_stt_stream(audio_queue: asyncio.Queue, result_callback: callable):
     """
     오디오 큐로부터 오디오를 받아 STT 스트리밍을 처리하고, 결과를 콜백으로 전달합니다.
-
-    Args:
-        audio_queue: 오디오 청크(bytes) 또는 종료 신호(None)를 포함하는 asyncio.Queue.
-        result_callback: 결과를 처리할 비동기 콜백 함수 (예: async def callback(transcript: str, is_final: bool)).
+    409 타임아웃 발생 시 STTTimeoutError를 발생시킵니다.
     """
     speech_client = None
     responses = None
@@ -111,18 +112,25 @@ async def handle_stt_stream(audio_queue: asyncio.Queue, result_callback: callabl
             is_final = result.is_final
 
             # 결과를 콜백 함수로 전달
-            logger.debug(f"STT 응답 수신: is_final={result.is_final}, transcript={transcript[:50]}...") # 일부만 로깅
+            logger.debug(f"STT 응답 수신: is_final={result.is_final}, transcript={transcript[:50]}...")
             await result_callback(transcript, is_final)
             logger.debug(f"STT 결과 콜백 호출 완료: is_final={result.is_final}")
 
+    except google_exceptions.Aborted as e:
+        # 오류 메시지 내용을 확인하여 타임아웃인지 판단
+        error_str = str(e).lower()
+        if "stream timed out" in error_str or "max duration" in error_str or "409" in error_str:
+            logger.warning(f"STT 서비스: 스트리밍 타임아웃(409) 발생: {e}. 재연결 필요 신호 발생.")
+            raise STTTimeoutError("STT stream timed out or reached max duration") from e
+        else:
+            # 타임아웃이 아닌 다른 Aborted 오류 처리
+            logger.error(f"STT 서비스: 처리 중 Aborted 오류 발생 (타임아웃 아님): {e}", exc_info=True)
+            raise
     except asyncio.CancelledError:
         logger.info("STT 서비스: 스트리밍 처리 취소됨.")
-        # 스트림이 취소되었음을 알리기 위해 콜백 호출 등 추가 처리 가능
+        raise
     except Exception as e:
-        logger.error(f"STT 서비스: 스트리밍 처리 중 오류 발생: {e}", exc_info=True)
-        # 오류 발생 시 콜백을 통해 오류 상태 전달 가능
-        # 예: await result_callback(f"Error: {e}", True, is_error=True)
+        logger.error(f"STT 서비스: 스트리밍 처리 중 예상치 못한 오류 발생: {e}", exc_info=True)
+        raise
     finally:
-        logger.info("STT 서비스: 스트리밍 처리 완료.")
-        # 클라이언트 리소스 정리 (필요한 경우)
-        # Async 클라이언트는 일반적으로 명시적 close가 필요 없을 수 있음
+        logger.info("STT 서비스: 스트리밍 처리 (한 세션) 완료.")
