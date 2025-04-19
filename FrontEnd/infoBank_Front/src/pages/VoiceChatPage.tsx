@@ -53,6 +53,13 @@ export default function VoiceChatPage() { // 간단한 함수 선언 방식 사�
           </div>
         )}
 
+        {/* TTS 오디오 재생 상태 표시 */}
+        <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+          <p className="text-blue-600">
+            🔊 TTS 오디오 재생: 서버에서 받은 음성 응답이 자동으로 재생됩니다.
+          </p>
+        </div>
+
         {/* 오류 메시지 표시 */}
         {errorMessage && (
           <div className="mt-4 p-3 bg-red-100 text-red-600 rounded-lg">

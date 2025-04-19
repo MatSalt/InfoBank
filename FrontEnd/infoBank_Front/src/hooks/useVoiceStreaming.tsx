@@ -48,6 +48,9 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
   const audioStreamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
+  const playbackAudioContextRef = useRef<AudioContext | null>(null);
+  const audioQueueRef = useRef<Uint8Array[]>([]);
+  const isPlayingRef = useRef<boolean>(false);
 
   // 브라우저 지원 여부 확인
   useEffect(() => {
@@ -72,6 +75,16 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
       audioContextRef.current.close();
       audioContextRef.current = null;
     }
+    
+    // 재생 오디오 컨텍스트 정리
+    if (playbackAudioContextRef.current) {
+      playbackAudioContextRef.current.close();
+      playbackAudioContextRef.current = null;
+    }
+    
+    // 오디오 큐 초기화
+    audioQueueRef.current = [];
+    isPlayingRef.current = false;
   }, []);
 
   // 녹음 중지 함수 - 먼저 정의
@@ -106,6 +119,108 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
     // webSocketRef, audioStreamRef는 onclose 또는 stopAudioStream에서 정리됨
   }, [stopAudioStream]);
 
+  // 오디오 재생 함수
+  const playAudioChunk = useCallback(async (audioData: Uint8Array): Promise<void> => {
+    return new Promise((resolve, reject) => { // Promise를 반환하도록 수정 (재생 완료 시 resolve)
+      try {
+        // --- 백엔드 TTS와 일치하는 샘플링 레이트 ---
+        const SAMPLE_RATE = 24000; // 백엔드에서 설정한 값 (예: 24000)
+
+        // 재생용 AudioContext가 없거나 닫혔으면 새로 생성 (샘플링 레이트 명시)
+        if (!playbackAudioContextRef.current || playbackAudioContextRef.current.state === 'closed') {
+          if (playbackAudioContextRef.current) {
+            playbackAudioContextRef.current.close(); // 이전 컨텍스트 정리
+          }
+          playbackAudioContextRef.current = new (window.AudioContext || window.webkitAudioContext)({
+            sampleRate: SAMPLE_RATE // 샘플링 레이트 지정
+          });
+          console.log(`Playback AudioContext 생성/재생성됨 (Sample Rate: ${SAMPLE_RATE}Hz)`);
+        } else if (playbackAudioContextRef.current.sampleRate !== SAMPLE_RATE) {
+            // 만약 기존 컨텍스트의 샘플링 레이트가 다르다면 (이론상 발생하기 어려움)
+            console.warn(`기존 AudioContext 샘플링 레이트(${playbackAudioContextRef.current.sampleRate})와 요청된 레이트(${SAMPLE_RATE})가 다릅니다. 컨텍스트를 재생성합니다.`);
+            playbackAudioContextRef.current.close();
+            playbackAudioContextRef.current = new (window.AudioContext || window.webkitAudioContext)({
+               sampleRate: SAMPLE_RATE
+            });
+        }
+
+
+        const audioContext = playbackAudioContextRef.current;
+
+        // 오디오 데이터를 AudioBuffer로 변환
+        const numberOfSamples = audioData.length / 2; // LINEAR16은 샘플당 2바이트
+        const audioBuffer = audioContext.createBuffer(
+          1, // 모노 채널
+          numberOfSamples,
+          SAMPLE_RATE // 백엔드와 일치하는 샘플링 레이트 사용
+        );
+        const channelData = audioBuffer.getChannelData(0); // 채널 데이터 (Float32Array)
+
+        // DataView를 사용하여 바이트 순서(little-endian)를 명시적으로 처리
+        const dataView = new DataView(audioData.buffer);
+        for (let i = 0; i < numberOfSamples; i++) {
+          // offset: i * 2 (2바이트씩 읽음), littleEndian: true
+          const int16Value = dataView.getInt16(i * 2, true);
+          // Float32Array (-1.0 ~ 1.0)로 정규화
+          channelData[i] = int16Value / 32768.0;
+        }
+
+        // 오디오 소스 생성 및 재생
+        const source = audioContext.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(audioContext.destination);
+
+        // 재생 완료 시 Promise를 resolve하고 소스 정리
+        source.onended = () => {
+          console.log(`오디오 청크 재생 완료 (${audioData.length} bytes)`);
+          source.disconnect();
+          resolve(); // Promise 완료 알림
+        };
+
+        source.start(0); // 즉시 재생
+
+      } catch (error) {
+        console.error('오디오 재생 함수 내 오류 발생:', error);
+        // 오류 발생 시 재생 상태 초기화 등 고려
+        isPlayingRef.current = false; // 재생 실패 시 상태 업데이트
+        reject(error); // Promise 실패 알림
+      }
+    }); // Promise 종료
+  }, []); // 의존성 배열 비우기 (내부에서 사용하는 상태/ref는 의존성이 아님)
+
+  // 오디오 큐 처리 함수 (재생 완료를 기다리도록 수정)
+  const processAudioQueue = useCallback(async (): Promise<void> => {
+      // 이미 재생 중이거나 큐가 비었으면 반환
+      if (isPlayingRef.current || audioQueueRef.current.length === 0) return;
+
+      isPlayingRef.current = true; // 재생 시작 플래그 설정
+      console.log("오디오 큐 처리 시작...");
+
+      // 큐에 있는 모든 오디오 데이터를 순차적으로 재생
+      while (audioQueueRef.current.length > 0) {
+        const audioData = audioQueueRef.current.shift(); // 큐에서 하나 꺼냄
+        if (audioData) {
+          try {
+            console.log(`다음 오디오 청크 재생 시도 (${audioData.length} bytes)...`);
+            // playAudioChunk가 반환하는 Promise를 기다려서 재생이 완료될 때까지 대기
+            await playAudioChunk(audioData);
+            console.log("이전 오디오 청크 재생 완료.");
+          } catch (error) {
+              console.error("오디오 큐 처리 중 playAudioChunk 오류:", error);
+              // 오류 발생 시 큐 처리 중단 또는 계속 진행 결정
+              // 여기서는 일단 중단하고 재생 상태 해제
+              isPlayingRef.current = false;
+              console.log("오디오 큐 처리 중 오류로 인해 중단됨.");
+              return; // 함수 종료
+          }
+        }
+      }
+
+      // 모든 큐 처리가 성공적으로 완료되면 재생 상태 해제
+      isPlayingRef.current = false;
+      console.log("오디오 큐 처리 완료.");
+  }, [playAudioChunk]); // playAudioChunk 함수에 의존
+
   // WebSocket 연결 설정 함수
   const setupWebSocket = useCallback((): Promise<WebSocket> => {
     return new Promise((resolve, reject) => {
@@ -127,7 +242,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
 
       // 메시지 수신 처리 (타입 명시: MessageEvent)
       ws.onmessage = (event: MessageEvent) => {
-         // 서버에서 텍스트(JSON) 또는 Blob을 보낼 수 있으므로 타입 확인
+         // 서버에서 텍스트(JSON) 또는 바이너리 데이터를 보낼 수 있으므로 타입 확인
         if (typeof event.data === 'string') {
             console.log('WebSocket 텍스트 메시지 수신:', event.data);
              try {
@@ -151,9 +266,30 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
                 // 단순 텍스트 응답 처리 (필요한 경우)
                 setTranscript(prev => prev + event.data);
              }
+        } else if (event.data instanceof ArrayBuffer) {
+             // 서버에서 오디오 데이터를 보낸 경우의 처리 (TTS 결과 재생)
+             console.log('WebSocket 바이너리 메시지 수신:', event.data.byteLength, 'bytes');
+             
+             // 오디오 데이터를 큐에 추가
+             const audioData = new Uint8Array(event.data);
+             audioQueueRef.current.push(audioData);
+             
+             // 오디오 큐 처리 시작
+             processAudioQueue();
         } else if (event.data instanceof Blob) {
-             console.log('WebSocket Blob 메시지 수신:', event.data);
-             // 서버에서 오디오 Blob 등을 보낸 경우의 처리 (예: TTS 결과 재생)
+             // Blob 데이터를 ArrayBuffer로 변환하여 처리
+             event.data.arrayBuffer().then(buffer => {
+                console.log('WebSocket Blob 메시지 수신:', buffer.byteLength, 'bytes');
+                
+                // 오디오 데이터를 큐에 추가
+                const audioData = new Uint8Array(buffer);
+                audioQueueRef.current.push(audioData);
+                
+                // 오디오 큐 처리 시작
+                processAudioQueue();
+             }).catch(error => {
+                console.error('Blob 처리 중 오류 발생:', error);
+             });
         } else {
             console.warn("Received unknown message type:", event.data);
         }
@@ -184,7 +320,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
         stopAudioStream(); // WebSocket 종료 시 스트림도 확실히 정리
       };
     });
-  }, [stopAudioStream]); // isRecording 의존성 제거 (onclose에서 직접 상태 참조 지양)
+  }, [stopAudioStream, processAudioQueue]); // processAudioQueue 의존성 추가
 
   // MediaRecorder 설정 및 스트리밍 시작 함수
   const setupAndStartStreaming = useCallback(async (): Promise<boolean> => {
