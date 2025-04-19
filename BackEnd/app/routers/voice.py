@@ -54,7 +54,9 @@ async def websocket_endpoint(websocket: WebSocket):
             if "bytes" in data: # 수신된 데이터가 오디오 청크(bytes)인 경우
                 audio_chunk = data["bytes"]
                 # 오디오 청크를 STT 서비스가 사용할 큐에 넣음
+                logger.debug(f"[{client_info}] 오디오 청크 수신: {len(audio_chunk)} bytes")
                 await audio_queue.put(audio_chunk)
+                logger.debug(f"[{client_info}] 오디오 청크를 큐에 추가 완료.")
 
             elif "text" in data: # 수신된 데이터가 텍스트인 경우
                 text_data = data["text"]

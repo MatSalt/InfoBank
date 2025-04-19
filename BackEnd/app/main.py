@@ -9,8 +9,12 @@ from .core.config import settings
 # 라우터 임포트 (voice 라우터)
 from app.routers import voice
 
-# 로깅 기본 설정 (애플리케이션 시작 시 한 번만 설정)
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# 로깅 설정
+logging.basicConfig(
+    level=logging.INFO,  # DEBUG에서 INFO로 변경
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 logger = logging.getLogger(__name__)
 
 # FastAPI 애플리케이션 인스턴스 생성
@@ -23,7 +27,7 @@ app = FastAPI(
 # CORS 설정
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_origins=["*"],  # 개발 환경에서는 모든 오리진 허용
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -32,7 +36,7 @@ app.add_middleware(
 # 루트 경로 핸들러 (선택 사항)
 @app.get("/")
 async def root():
-    return {"message": "InfoBank API 서버에 오신 것을 환영합니다!"}
+    return {"message": "Welcome to InfoBank API"}
 
 # Voice 라우터 포함
 # voice.router에 정의된 모든 경로는 /ws 접두사를 가지게 됨

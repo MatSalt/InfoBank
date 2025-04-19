@@ -39,7 +39,9 @@ async def request_generator(audio_queue: asyncio.Queue, recognizer: str, config:
             if chunk is None:
                 logger.debug("STT 서비스: None 청크 수신, 오디오 스트림 중단.")
                 break
+            logger.debug(f"STT 서비스: 큐에서 {len(chunk)} 바이트 오디오 청크 가져옴.")
             yield cloud_speech.StreamingRecognizeRequest(audio=chunk)
+            logger.debug("STT 서비스: 오디오 청크 요청 전송 완료.")
             audio_queue.task_done()
 
     except asyncio.CancelledError:
@@ -96,7 +98,9 @@ async def handle_stt_stream(audio_queue: asyncio.Queue, result_callback: callabl
 
         # 응답 처리
         async for response in responses:
+            logger.debug(f"STT 서비스: Google로부터 응답 수신: {response}")
             if not response.results:
+                logger.debug("STT 서비스: 결과 없는 응답 수신.")
                 continue
             result = response.results[0]
             if not result.alternatives:
@@ -107,7 +111,9 @@ async def handle_stt_stream(audio_queue: asyncio.Queue, result_callback: callabl
             is_final = result.is_final
 
             # 결과를 콜백 함수로 전달
+            logger.debug(f"STT 응답 수신: is_final={result.is_final}, transcript={transcript[:50]}...") # 일부만 로깅
             await result_callback(transcript, is_final)
+            logger.debug(f"STT 결과 콜백 호출 완료: is_final={result.is_final}")
 
     except asyncio.CancelledError:
         logger.info("STT 서비스: 스트리밍 처리 취소됨.")

@@ -22,6 +22,13 @@ interface UseVoiceStreamingReturn {
   stopRecording: () => void;
 }
 
+// 전역 Window 인터페이스 확장
+declare global {
+  interface Window {
+    webkitAudioContext?: typeof AudioContext;
+  }
+}
+
 /**
  * AI 음성 대화 스트리밍을 위한 커스텀 훅 (TypeScript)
  * @returns {UseVoiceStreamingReturn} 음성 스트리밍 관련 상태 및 제어 함수
@@ -39,6 +46,8 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const webSocketRef = useRef<WebSocket | null>(null);
   const audioStreamRef = useRef<MediaStream | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
 
   // 브라우저 지원 여부 확인
   useEffect(() => {
@@ -52,6 +61,17 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
       console.log("마이크 스트림 중지됨");
       audioStreamRef.current = null;
     }
+    
+    // 오디오 컨텍스트 정리
+    if (audioProcessorRef.current) {
+      audioProcessorRef.current.disconnect();
+      audioProcessorRef.current = null;
+    }
+    
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
   }, []);
 
   // 녹음 중지 함수 - 먼저 정의
@@ -63,8 +83,17 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
     }
 
     if (webSocketRef.current?.readyState === WebSocket.OPEN) {
-      webSocketRef.current.close(1000, "Client stopped recording");
-      console.log("WebSocket 연결 종료 요청됨.");
+      // 1. 서버에 "disconnect" 메시지를 먼저 보냅니다.
+      webSocketRef.current.send("disconnect");
+      console.log("서버에 연결 종료 신호를 보냈습니다.");
+      
+      // 2. 잠시 후에 실제 연결을 종료합니다.
+      setTimeout(() => {
+        if (webSocketRef.current?.readyState === WebSocket.OPEN) {
+          webSocketRef.current.close(1000, "Client stopped recording");
+          console.log("WebSocket 연결 종료 요청됨.");
+        }
+      }, 100); // 100ms 지연
     } else {
       // WebSocket이 없거나 이미 닫혔으면 스트림만 정리
       stopAudioStream();
@@ -86,7 +115,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
       }
 
       const ws = new WebSocket(WEBSOCKET_URL);
-      ws.binaryType = 'blob'; // 바이너리 타입 설정
+      ws.binaryType = 'arraybuffer'; // 바이너리 타입을 arraybuffer로 설정 (PCM 데이터 전송용)
 
       ws.onopen = () => {
         console.log('WebSocket 연결 성공');
@@ -165,69 +194,66 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
     }
 
     try {
-      const stream: MediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // 오디오 스트림 가져오기
+      const stream: MediaStream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          channelCount: 1, // 모노 채널
+          sampleRate: 16000, // 16kHz 샘플링 레이트
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        } 
+      });
       audioStreamRef.current = stream;
 
-      const options = { mimeType: 'audio/webm;codecs=opus', audioBitsPerSecond: 16000 };
-      let recorder: MediaRecorder;
-      try {
-        recorder = new MediaRecorder(stream, options);
-      } catch {
-        console.warn("WebM Opus not supported, trying default");
-        try {
-          recorder = new MediaRecorder(stream);
-        } catch (err2) {
-          console.error("MediaRecorder not supported with any mimeType:", err2);
-          setErrorMessage('오디오 녹음 형식이 지원되지 않습니다.');
-          stopAudioStream();
-          return false;
-        }
-      }
-      console.log("Using mimeType:", recorder.mimeType);
-      mediaRecorderRef.current = recorder;
-
-      const timeSliceMs = 500;
-
-      // 데이터 수신 처리 (타입 명시: BlobEvent)
-      recorder.ondataavailable = (event: BlobEvent) => {
-        // webSocketRef.current가 null이 아닐 때만 send 호출 (타입 가드)
-        if (event.data.size > 0 && webSocketRef.current?.readyState === WebSocket.OPEN) {
-          webSocketRef.current.send(event.data);
-        } else if (webSocketRef.current && webSocketRef.current.readyState !== WebSocket.OPEN) {
-          console.warn("WebSocket is not open. Cannot send audio data.");
-        }
-      };
-
-      recorder.onstop = () => {
-        console.log("MediaRecorder 중지됨.");
-      };
-
-      // 오류 처리 (타입 명시: Event - MediaRecorderErrorEvent는 표준이 아님)
-      recorder.onerror = (event: Event) => {
-        console.error("MediaRecorder 오류:", event);
-        // event.error를 직접 사용하기 어려울 수 있음, name으로 구분 시도
-        const errorEvent = event as { error?: { name?: string } };
-        setErrorMessage(`녹음 중 오류 발생: ${errorEvent.error?.name || 'Unknown error'}`);
-        stopRecording(); // 오류 시 녹음 중지 로직 실행
-      };
-
+      // WebSocket 연결 설정
       setIsConnecting(true);
       setStatusMessage('WebSocket 연결 중...');
       await setupWebSocket();
 
-      if (webSocketRef.current?.readyState === WebSocket.OPEN) {
-        recorder.start(timeSliceMs);
-        console.log(`녹음 및 스트리밍 시작 (timeslice: ${timeSliceMs}ms)`);
-        return true;
-      } else {
+      if (webSocketRef.current?.readyState !== WebSocket.OPEN) {
         console.error("WebSocket 연결 실패하여 녹음을 시작할 수 없습니다.");
-        // setupWebSocket 내부에서 errorMessage 설정됨
         stopAudioStream();
         return false;
       }
 
+      // Web Audio API를 사용하여 LINEAR16 PCM 데이터 생성
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)({
+        sampleRate: 16000 // 16kHz 샘플링 레이트
+      });
+      audioContextRef.current = audioContext;
+
+      const source = audioContext.createMediaStreamSource(stream);
+      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+      audioProcessorRef.current = processor;
+
+      // 오디오 처리 및 전송
+      processor.onaudioprocess = (e) => {
+        if (webSocketRef.current?.readyState === WebSocket.OPEN) {
+          // 입력 버퍼에서 데이터 가져오기
+          const inputData = e.inputBuffer.getChannelData(0);
+          
+          // Float32Array를 Int16Array로 변환 (LINEAR16 형식)
+          const pcmData = new Int16Array(inputData.length);
+          for (let i = 0; i < inputData.length; i++) {
+            // Float32Array (-1.0 ~ 1.0)를 Int16Array (-32768 ~ 32767)로 변환
+            pcmData[i] = Math.max(-32768, Math.min(32767, Math.floor(inputData[i] * 32767)));
+          }
+          
+          // WebSocket으로 전송
+          webSocketRef.current.send(pcmData.buffer);
+        }
+      };
+
+      // 오디오 노드 연결
+      source.connect(processor);
+      processor.connect(audioContext.destination);
+
+      console.log(`녹음 및 스트리밍 시작 (LINEAR16 PCM, 16kHz, 모노)`);
+      return true;
+
     } catch (err) {
-      console.error('마이크 접근 또는 MediaRecorder 설정 오류:', err);
+      console.error('마이크 접근 또는 오디오 처리 설정 오류:', err);
       if (err instanceof Error) { // Error 타입인지 확인
           if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
             setErrorMessage('마이크 사용 권한이 거부되었습니다.');
@@ -248,36 +274,24 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
 
     setTranscript('');
     setErrorMessage('');
+    setIsRecording(true);
     setStatusMessage('녹음 준비 중...');
 
     const success = await setupAndStartStreaming();
-    if (success) {
-      setIsRecording(true);
-      // statusMessage는 setupWebSocket 또는 setupAndStartStreaming에서 설정됨
-    } else {
-      // 실패 메시지는 setupAndStartStreaming 내부에서 설정됨
-      setStatusMessage('녹음을 시작하지 못했습니다.'); // 최종 실패 메시지
+    if (!success) {
+      setIsRecording(false);
+      setStatusMessage('녹음 시작 실패. 다시 시도하세요.');
     }
   }, [isRecording, isConnecting, setupAndStartStreaming]);
 
   // 컴포넌트 언마운트 시 정리
   useEffect(() => {
     return () => {
-      console.log("컴포넌트 언마운트: 리소스 정리 시도");
-      // null 체크 추가
-      if (mediaRecorderRef.current?.state === 'recording') {
-        mediaRecorderRef.current.stop();
-      }
-      if (webSocketRef.current?.readyState === WebSocket.OPEN) {
-        webSocketRef.current.close(1000, "Component unmounted");
-      }
-      stopAudioStream();
-      mediaRecorderRef.current = null;
-      webSocketRef.current = null;
+      stopRecording();
     };
-  }, [stopAudioStream]);
+  }, [stopRecording]);
 
-  // 훅이 반환하는 값들 (명시적 타입 반환)
+  // 반환 객체
   return {
     isRecording,
     statusMessage,
@@ -286,6 +300,6 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
     isConnecting,
     transcript,
     startRecording,
-    stopRecording,
+    stopRecording
   };
 }
