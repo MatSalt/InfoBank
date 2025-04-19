@@ -34,6 +34,7 @@ class Settings(BaseSettings):
         # .env 파일이 존재하면 로드
         env_file = ".env"
         env_file_encoding = 'utf-8' # 인코딩 설정
+        extra = "allow"  # 추가 필드 허용
 
 # 설정 객체 인스턴스 생성
 settings = Settings()
