@@ -1,13 +1,14 @@
 # backend/app/routers/voice.py
 import logging
 import asyncio
+import re # 정규식 임포트 (현재 로직에서는 필수는 아니지만 향후 사용을 위해)
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 from app.services.stt_service import handle_stt_stream, STTTimeoutError
 from app.services.llm_service import stream_llm_response
 from app.services.tts_service import synthesize_speech_stream # 업데이트된 TTS 서비스 임포트
 from google.api_core import exceptions as google_exceptions
-from typing import Set
+from typing import Set, AsyncIterator # AsyncIterator 임포트
 import os # 오류 확인을 위한 임포트
 
 # 로거 설정
@@ -19,10 +20,86 @@ router = APIRouter(
     tags=["voice"],
 )
 
+# --- 텍스트 청킹을 위한 헬퍼 함수 ---
+async def chunk_text_by_punctuation(
+    llm_stream: AsyncIterator[str],
+    min_length: int = 10, # 최소 길이를 약간 증가
+    punctuation: str = '.?!,' # 구두점으로 분할
+) -> AsyncIterator[str]:
+    """
+    LLM 텍스트 스트림을 비동기적으로 소비하고, 텍스트를 누적하여
+    구두점이나 최소 길이로 분할된 청크를 생성하여 더 자연스러운 TTS 입력을 제공합니다.
+
+    Args:
+        llm_stream: LLM에서 텍스트 청크를 생성하는 비동기 이터레이터
+        min_length: 구두점이 없을 때 생성하기 전에 누적할 대략적인 최소 길이
+        punctuation: 문장을 분할할 구두점 문자들을 포함하는 문자열
+
+    Yields:
+        str: TTS에 적합한 처리된 텍스트 청크
+    """
+    temp_chunk = ""
+    logger.debug("텍스트 청커 시작.")
+    try:
+        async for chunk_text in llm_stream:
+            if not chunk_text: continue # LLM의 빈 청크 건너뛰기
+
+            temp_chunk += chunk_text
+            # print(f"누적된 텍스트: '{temp_chunk}'") # 디버그 로깅
+
+            # 누적된 청크가 분할할 수 있을 만큼 충분히 긴지 확인
+            if len(temp_chunk) >= min_length:
+                last_punctuation_pos = -1
+                # 마지막 구두점의 위치 찾기
+                for i, char in enumerate(reversed(temp_chunk)):
+                    if char in punctuation:
+                        # 문자열 시작부터의 인덱스 계산
+                        last_punctuation_pos = len(temp_chunk) - 1 - i
+                        break # 마지막 것을 찾았으므로 중단
+
+                if last_punctuation_pos != -1:
+                    # 구두점을 찾았으므로, 그것까지의 부분을 생성
+                    text_to_yield = temp_chunk[:last_punctuation_pos + 1].strip()
+                    if text_to_yield:
+                        logger.debug(f"텍스트 청커 생성 (구두점): '{text_to_yield}'")
+                        yield text_to_yield
+                    # 나머지는 다음 반복을 위해 보관
+                    temp_chunk = temp_chunk[last_punctuation_pos + 1:]
+                    # print(f"나머지: '{temp_chunk}'") # 디버그 로깅
+                else:
+                    # 구두점을 찾지 못했지만 길이는 충분함
+                    # 전체 청크를 생성하고 초기화
+                    # LLM이 구두점을 사용하지 않는 경우 매우 긴 청크가 되는 것을 방지
+                    # 대안: 더 오래 기다릴 수 있지만 지연이 증가할 수 있음
+                    text_to_yield = temp_chunk.strip()
+                    if text_to_yield:
+                        logger.debug(f"텍스트 청커 생성 (길이): '{text_to_yield}'")
+                        yield text_to_yield
+                    temp_chunk = ""
+
+        # 스트림이 끝난 후 남은 텍스트 생성
+        if temp_chunk and temp_chunk.strip():
+            logger.debug(f"텍스트 청커 생성 (나머지): '{temp_chunk.strip()}'")
+            yield temp_chunk.strip()
+
+        logger.debug("텍스트 청커 종료.")
+
+    except asyncio.CancelledError:
+         logger.info("텍스트 청커 태스크 취소됨.")
+         raise
+    except Exception as e:
+         logger.error(f"텍스트 청커에서 오류 발생: {e}", exc_info=True)
+         # 오류 발생 전에 남은 청크를 생성 시도
+         if temp_chunk and temp_chunk.strip():
+              try: yield temp_chunk.strip()
+              except Exception: pass
+         raise # 오류를 다시 발생시킴
+
+
 @router.websocket("/audio")
 async def websocket_endpoint(websocket: WebSocket):
     """
-    WebSocket 연결을 처리하고, 오디오 수신 -> STT -> LLM -> TTS -> 오디오 전송 파이프라인을 관리합니다.
+    WebSocket 연결을 처리하고, 오디오 수신 -> STT -> LLM -> 텍스트 청킹 -> TTS -> 오디오 전송 파이프라인을 관리합니다.
     """
     await websocket.accept()
     client_host = websocket.client.host
@@ -37,110 +114,101 @@ async def websocket_endpoint(websocket: WebSocket):
     # 연결 상태 플래그 - 외부 스코프에서 정의
     is_connected = True
 
-    # --- LLM 및 TTS 처리 함수 ---
+    # --- LLM, 텍스트 청킹, TTS 처리 함수 ---
     async def handle_llm_and_tts(transcript: str, ws: WebSocket, client_id: str):
-        """LLM 응답을 받아 TTS로 변환하고 WebSocket으로 오디오 청크를 전송합니다."""
-        # *** 수정: 외부 스코프 변수를 수정하기 위해 is_connected를 nonlocal로 선언 ***
+        """LLM 응답을 받아 자연스럽게 청킹하고, TTS로 변환하여 WebSocket으로 오디오 청크를 전송합니다."""
         nonlocal is_connected
-        logger.info(f"[{client_id}] Starting LLM->TTS pipeline for final STT result: '{transcript[:50]}...'")
+        logger.info(f"[{client_id}] 최종 STT 결과로 LLM->청커->TTS 파이프라인 시작: '{transcript[:50]}...'")
         llm_stream = None
+        processed_text_stream = None
         tts_stream = None
         try:
             # 1. LLM 서비스 호출하여 텍스트 스트림 받기
             llm_stream = stream_llm_response(transcript, client_id)
 
-            # 2. TTS 서비스 호출하여 오디오 스트림 받기 (LLM 스트림을 직접 전달)
-            tts_stream = synthesize_speech_stream(llm_stream) # 비동기 이터레이터 전달
+            # 2. 텍스트 청킹 로직 적용
+            processed_text_stream = chunk_text_by_punctuation(llm_stream)
 
-            # 3. 오디오 청크를 WebSocket으로 스트리밍
+            # 3. 처리된 텍스트 스트림으로 TTS 서비스 호출
+            tts_stream = synthesize_speech_stream(processed_text_stream) # 청킹된 이터레이터 전달
+
+            # 4. 오디오 청크를 WebSocket으로 스트리밍
             async for audio_chunk in tts_stream:
-                # 전송 시도 전 연결 상태 확인
                 if not is_connected:
-                    logger.warning(f"[{client_id}] WebSocket disconnected (checked before send), stopping TTS audio transmission.")
-                    break # 연결이 끊어졌으면 루프 종료
+                    logger.warning(f"[{client_id}] WebSocket 연결이 끊어져 TTS 오디오 전송 중단.")
+                    break
 
                 try:
-                    # 전송 직전 상태 재확인 (이중 확인)
                     if ws.client_state == WebSocketState.CONNECTED:
                         await ws.send_bytes(audio_chunk)
                         logger.debug(f"[{client_id}] TTS 오디오 청크 전송됨 ({len(audio_chunk)} bytes)")
                     else:
-                        logger.warning(f"[{client_id}] WebSocket이 더 이상 연결되지 않았습니다. TTS 오디오 청크를 전송할 수 없습니다.")
-                        is_connected = False # 플래그 업데이트
-                        break
+                         logger.warning(f"[{client_id}] WebSocket이 더 이상 연결되지 않았습니다. TTS 오디오 청크를 전송할 수 없습니다.")
+                         is_connected = False
+                         break
                 except WebSocketDisconnect:
                     logger.warning(f"[{client_id}] TTS 오디오 청크 전송 중 WebSocket 연결이 끊어졌습니다.")
                     is_connected = False
                     break
                 except Exception as e:
-                    # 다른 잠재적 전송 오류 로깅 (예: 연결 재설정)
                     logger.warning(f"[{client_id}] TTS 오디오 청크 전송 중 오류: {e}")
-                    # 이 오류가 연결 손실을 의미하는지 고려
                     if isinstance(e, (ConnectionResetError, BrokenPipeError)):
                          is_connected = False
-                    # 오류 유형에 따라 중단 여부 결정
-                    break # 대부분의 오류에서 전송 중단
+                    break
 
-            # 루프 종료 후 연결 상태에 따른 로깅
             if is_connected:
-                logger.info(f"[{client_id}] LLM->TTS 오디오 스트리밍 완료.")
+                 logger.info(f"[{client_id}] LLM->청커->TTS 오디오 스트리밍 완료.")
             else:
-                logger.warning(f"[{client_id}] 연결 끊김으로 인해 LLM->TTS 오디오 스트리밍이 중단되었습니다.")
+                 logger.warning(f"[{client_id}] 연결 끊김으로 인해 LLM->청커->TTS 오디오 스트리밍이 중단되었습니다.")
 
 
         except asyncio.CancelledError:
-            logger.info(f"[{client_id}] LLM->TTS 파이프라인 태스크 취소됨.")
-            # 필요한 경우 관련 스트림(수동 관리되는 경우) 정리
+            logger.info(f"[{client_id}] LLM->청커->TTS 파이프라인 태스크 취소됨.")
         except Exception as e:
-            logger.error(f"[{client_id}] LLM->TTS 파이프라인 처리 중 오류 발생: {e}", exc_info=True)
-            # 선택적으로 클라이언트에게 알림
+            logger.error(f"[{client_id}] LLM->청커->TTS 파이프라인 처리 중 오류 발생: {e}", exc_info=True)
             if is_connected and ws.client_state == WebSocketState.CONNECTED:
                 try:
                     error_message = f"응답 처리 중 서버 오류: {type(e).__name__}"
-                    await ws.send_text(f'{{"error": "{error_message}"}}') # JSON 오류 전송
+                    await ws.send_text(f'{{"error": "{error_message}"}}')
                 except Exception as send_err:
-                     logger.warning(f"[{client_id}] Failed to send error message to client: {send_err}")
+                     logger.warning(f"[{client_id}] 클라이언트에게 오류 메시지 전송 실패: {send_err}")
         finally:
-             # 태스크 제거는 add_done_callback에서 처리됨
-             logger.debug(f"[{client_id}] LLM->TTS pipeline task finished execution.")
+             logger.debug(f"[{client_id}] LLM->청커->TTS 파이프라인 태스크 실행 완료.")
 
 
     # --- STT 결과 처리 콜백 ---
     async def process_stt_result(transcript: str, is_final: bool):
-        """STT 결과를 처리하는 콜백 함수. 최종 결과에서 LLM->TTS 파이프라인을 시작합니다."""
-        nonlocal llm_tts_tasks # 외부 스코프의 태스크 집합 사용
-        # 외부 스코프의 is_connected 플래그 사용
+        """STT 결과를 처리하는 콜백 함수. 최종 결과에서 LLM->청커->TTS 파이프라인을 시작합니다."""
+        nonlocal llm_tts_tasks
         if not is_connected:
-            logger.warning(f"[{client_info}] STT result received but WebSocket is disconnected. Ignoring.")
+            logger.warning(f"[{client_info}] STT 결과가 수신되었지만 WebSocket이 연결되지 않았습니다. 무시합니다.")
             return
 
         if not is_final:
-            logger.debug(f"[{client_info}] Interim STT result: {transcript}")
+            logger.debug(f"[{client_info}] 중간 STT 결과: {transcript}")
             # 선택적으로 중간 결과 전송 (JSON 텍스트)
             # try:
             #     if websocket.client_state == WebSocketState.CONNECTED:
             #         await websocket.send_text(f'{{"transcript": "{transcript}", "is_final": false}}')
             # except Exception: pass
         else:
-            logger.info(f"[{client_info}] Final STT result: {transcript}")
+            logger.info(f"[{client_info}] 최종 STT 결과: {transcript}")
             # 선택적으로 최종 텍스트 결과 전송
             # try:
             #     if websocket.client_state == WebSocketState.CONNECTED:
             #          await websocket.send_text(f'{{"transcript": "{transcript}", "is_final": true}}')
             # except Exception: pass
 
-            # 비어있지 않은 최종 결과만 처리
             if transcript and transcript.strip():
-                # LLM->TTS 파이프라인을 별도 태스크로 시작
+                # LLM->청커->TTS 파이프라인을 별도 태스크로 시작
                 llm_tts_task = asyncio.create_task(
                     handle_llm_and_tts(transcript, websocket, client_info)
                 )
                 llm_tts_tasks.add(llm_tts_task)
-                # 완료/취소 시 태스크를 집합에서 제거하는 콜백 추가
                 llm_tts_task.add_done_callback(llm_tts_tasks.discard)
-                logger.debug(f"[{client_info}] LLM->TTS pipeline task created: {llm_tts_task.get_name()}")
+                logger.debug(f"[{client_info}] LLM->청커->TTS 파이프라인 태스크 생성됨: {llm_tts_task.get_name()}")
             else:
-                logger.info(f"[{client_info}] Empty final STT result. Skipping LLM->TTS pipeline.")
+                logger.info(f"[{client_info}] 빈 최종 STT 결과. LLM->청커->TTS 파이프라인 건너뜀.")
 
 
     # --- 메인 루프: STT 관리 및 메시지 수신 ---
@@ -151,43 +219,37 @@ async def websocket_endpoint(websocket: WebSocket):
                 should_restart_stt = False
                 if stt_task and stt_task.done():
                     try:
-                        stt_task.result() # 완료된 태스크의 예외 확인
-                        # STT 태스크가 오류 없이 종료된 경우 (예: None 신호),
-                        # 여전히 '연결된' 상태라면 재시작할지 또는 루프를 종료할지 결정
-                        # 현재 로직은 should_restart_stt가 True일 때 재시작
+                        stt_task.result()
                     except STTTimeoutError:
-                        logger.info(f"[{client_info}] STT timeout detected. Will restart STT service.")
+                        logger.info(f"[{client_info}] STT 타임아웃 감지. STT 서비스를 재시작합니다.")
                         should_restart_stt = True
                     except google_exceptions.InternalServerError as e_internal:
-                         logger.warning(f"[{client_info}] STT service internal server error (500): {e_internal}. Will attempt restart.")
+                         logger.warning(f"[{client_info}] STT 서비스 내부 서버 오류(500): {e_internal}. 재시작 시도.")
                          should_restart_stt = True
                     except asyncio.CancelledError:
-                        logger.info(f"[{client_info}] Previous STT task was cancelled.")
-                        if is_connected: should_restart_stt = True # 취소되었지만 여전히 연결된 경우 재시작
+                        logger.info(f"[{client_info}] 이전 STT 태스크가 취소되었습니다.")
+                        if is_connected: should_restart_stt = True
                     except Exception as e:
-                        logger.error(f"[{client_info}] Unhandled exception in previous STT task: {e}. Closing connection.", exc_info=True)
-                        is_connected = False # 처리되지 않은 STT 오류 시 연결 종료
+                        logger.error(f"[{client_info}] 이전 STT 태스크에서 처리되지 않은 예외 발생: {e}. 연결 종료.", exc_info=True)
+                        is_connected = False
 
-                # 필요하고 여전히 연결된 경우 STT 시작/재시작
                 if is_connected and (stt_task is None or should_restart_stt):
-                    logger.info(f"[{client_info}] (Re)starting STT service task...")
-                    # STT 재시작 전에 큐를 비움
+                    logger.info(f"[{client_info}] STT 서비스 태스크 (재)시작 중...")
                     while not audio_queue.empty():
                         try:
                             audio_queue.get_nowait()
                             audio_queue.task_done()
                         except (asyncio.QueueEmpty, ValueError): break
-                    logger.debug(f"[{client_info}] Cleared audio queue before restarting STT.")
+                    logger.debug(f"[{client_info}] STT 재시작 전 오디오 큐 비움.")
 
                     stt_task = asyncio.create_task(
                         handle_stt_stream(audio_queue, process_stt_result)
                     )
-                    await asyncio.sleep(0.1) # 짧은 일시 중지
+                    await asyncio.sleep(0.1)
 
             # 2. WebSocket 메시지 수신 또는 STT 태스크 완료 대기
-            if not is_connected: break # 연결이 끊어졌으면 루프 종료
+            if not is_connected: break
 
-            # 메시지 또는 STT 태스크 완료 대기
             tasks_to_wait = [asyncio.create_task(websocket.receive())]
             if stt_task and not stt_task.done():
                 tasks_to_wait.append(stt_task)
@@ -195,115 +257,89 @@ async def websocket_endpoint(websocket: WebSocket):
             done, pending = await asyncio.wait(
                 tasks_to_wait,
                 return_when=asyncio.FIRST_COMPLETED
-                # 여기서 타임아웃 제거, STT 타임아웃과 WebSocket keepalive에 의존
             )
 
-            # 완료된 태스크 처리
             for task in done:
                 if task == stt_task:
-                     # STT 태스크 완료, 다음 반복에서 stt_task.done() 확인
-                     logger.debug(f"[{client_info}] STT task completed its run (detected in wait).")
-                     # 여기서도 오류 확인 필요
-                     try:
-                          task.result()
-                     except STTTimeoutError:
-                          logger.info(f"[{client_info}] STT timeout detected (from wait).")
-                          # 루프가 재시작 처리
-                     except google_exceptions.InternalServerError as e_internal:
-                          logger.warning(f"[{client_info}] STT internal server error (500) detected (from wait): {e_internal}.")
-                     except asyncio.CancelledError:
-                          logger.info(f"[{client_info}] STT task cancelled (detected in wait).")
+                     logger.debug(f"[{client_info}] STT 태스크 실행 완료 (대기 중 감지).")
+                     try: task.result()
+                     except STTTimeoutError: logger.info(f"[{client_info}] STT 타임아웃 감지 (대기 중).")
+                     except google_exceptions.InternalServerError as e_internal: logger.warning(f"[{client_info}] STT 내부 서버 오류(500) 감지 (대기 중): {e_internal}.")
+                     except asyncio.CancelledError: logger.info(f"[{client_info}] STT 태스크 취소됨 (대기 중).")
                      except Exception as e:
-                          logger.error(f"[{client_info}] Unhandled STT exception (from wait): {e}. Closing.", exc_info=True)
+                          logger.error(f"[{client_info}] 처리되지 않은 STT 예외 (대기 중): {e}. 연결 종료.", exc_info=True)
                           is_connected = False
-                     # 잠재적 재시작을 위해 다음 루프 반복으로 계속
                      continue
 
-                # STT 태스크가 아니면 수신 태스크
                 receive_task = task
                 try:
-                    data = receive_task.result() # 수신 태스크에서 데이터 가져오기
+                    data = receive_task.result()
                     if isinstance(data, dict):
                         if data.get("type") == "websocket.disconnect":
-                            logger.warning(f"[{client_info}] WebSocket disconnect message received: {data}. Closing.")
+                            logger.warning(f"[{client_info}] WebSocket 연결 끊김 메시지 수신: {data}. 종료.")
                             is_connected = False
                         elif "text" in data:
                             text_data = data["text"]
-                            logger.info(f"[{client_info}] Text message received: {text_data}")
+                            logger.info(f"[{client_info}] 텍스트 메시지 수신: {text_data}")
                             if text_data.lower() in ["client stopped recording", "disconnect", "stop"]:
-                                logger.info(f"[{client_info}] Client stop signal received. Sending None to audio queue.")
+                                logger.info(f"[{client_info}] 클라이언트 중지 신호 수신. 오디오 큐에 None 전송.")
                                 if audio_queue:
-                                    # None을 비차단적으로 또는 타임아웃과 함께 전송
-                                    try:
-                                        await asyncio.wait_for(audio_queue.put(None), timeout=1.0)
-                                    except asyncio.TimeoutError:
-                                         logger.warning(f"[{client_info}] Timeout putting None into audio queue.")
-                                # STT가 None 신호를 처리하도록 하고 즉시 연결을 끊지 않음
+                                    try: await asyncio.wait_for(audio_queue.put(None), timeout=1.0)
+                                    except asyncio.TimeoutError: logger.warning(f"[{client_info}] 오디오 큐에 None 전송 타임아웃.")
                         elif "bytes" in data:
                             audio_chunk = data["bytes"]
-                            if audio_chunk and audio_queue:
-                                await audio_queue.put(audio_chunk)
-                            else:
-                                logger.debug(f"[{client_info}] Empty audio chunk received, ignored.")
+                            if audio_chunk and audio_queue: await audio_queue.put(audio_chunk)
+                            else: logger.debug(f"[{client_info}] 빈 오디오 청크 수신, 무시됨.")
                     else:
-                        logger.warning(f"[{client_info}] Unexpected data type received: {type(data)}")
+                        logger.warning(f"[{client_info}] 예상치 못한 데이터 유형 수신: {type(data)}")
 
                 except WebSocketDisconnect as e:
-                    logger.warning(f"[{client_info}] WebSocket disconnected during receive: Code {e.code}, Reason: {e.reason}.")
+                    logger.warning(f"[{client_info}] 수신 중 WebSocket 연결 끊김: 코드 {e.code}, 이유: {e.reason}.")
                     is_connected = False
                 except asyncio.CancelledError:
-                     logger.info(f"[{client_info}] Receive task cancelled.")
-                     is_connected = False # 연결이 닫히는 중으로 가정
+                     logger.info(f"[{client_info}] 수신 태스크 취소됨.")
+                     is_connected = False
                 except Exception as e_recv:
-                    logger.error(f"[{client_info}] Error during WebSocket receive: {e_recv}", exc_info=True)
+                    logger.error(f"[{client_info}] WebSocket 수신 중 오류: {e_recv}", exc_info=True)
                     is_connected = False
 
-            # 대기 중인 태스크가 있으면 취소 (STT 태스크가 완료된 경우 수신 태스크만)
             for task in pending:
-                 if task != stt_task: # STT 태스크가 대기 중이면 취소하지 않음
-                      task.cancel()
+                 if task != stt_task: task.cancel()
 
 
     except WebSocketDisconnect as e:
-        logger.warning(f"WebSocket connection closed externally: {client_info} - Code: {e.code}, Reason: {e.reason}")
+        logger.warning(f"WebSocket 연결이 외부에서 닫힘: {client_info} - 코드: {e.code}, 이유: {e.reason}")
         is_connected = False
     except asyncio.CancelledError:
-        logger.info(f"[{client_info}] Main WebSocket handler task cancelled.")
+        logger.info(f"[{client_info}] 메인 WebSocket 핸들러 태스크 취소됨.")
         is_connected = False
     except Exception as e:
-        logger.error(f"Unhandled exception in WebSocket handler ({client_info}): {e}", exc_info=True)
+        logger.error(f"WebSocket 핸들러에서 처리되지 않은 예외 발생 ({client_info}): {e}", exc_info=True)
         is_connected = False
     finally:
-        logger.info(f"[{client_info}] Starting WebSocket cleanup...")
+        # --- 정리 작업은 동일하게 유지 ---
+        logger.info(f"[{client_info}] WebSocket 정리 시작...")
         is_connected = False # 플래그가 false인지 확인
 
         # 1. STT 태스크 취소
         if stt_task and not stt_task.done():
-            logger.info(f"[{client_info}] Cancelling STT service task...")
+            logger.info(f"[{client_info}] STT 서비스 태스크 취소 중...")
             stt_task.cancel()
-            try:
-                await stt_task
-            except asyncio.CancelledError:
-                logger.info(f"[{client_info}] STT service task successfully cancelled.")
-            except Exception as e_stt_final:
-                logger.error(f"[{client_info}] Error waiting for STT task cancellation: {e_stt_final}", exc_info=True)
+            try: await stt_task
+            except asyncio.CancelledError: logger.info(f"[{client_info}] STT 서비스 태스크 성공적으로 취소됨.")
+            except Exception as e_stt_final: logger.error(f"[{client_info}] STT 태스크 취소 대기 중 오류 발생: {e_stt_final}", exc_info=True)
 
         # 2. LLM/TTS 태스크 취소
         if llm_tts_tasks:
-            logger.info(f"[{client_info}] Cancelling {len(llm_tts_tasks)} LLM->TTS tasks...")
+            logger.info(f"[{client_info}] {len(llm_tts_tasks)}개의 LLM->청커->TTS 태스크 취소 중...")
             tasks_to_await = list(llm_tts_tasks)
             for task in tasks_to_await:
-                if not task.done():
-                    task.cancel()
+                if not task.done(): task.cancel()
             results = await asyncio.gather(*tasks_to_await, return_exceptions=True)
-            # 취소/완료 결과 로깅
             for i, result in enumerate(results):
                  task_name = tasks_to_await[i].get_name() if hasattr(tasks_to_await[i], 'get_name') else f"LLM-TTS-Task-{i}"
-                 if isinstance(result, asyncio.CancelledError):
-                      logger.info(f"[{client_info}] {task_name} successfully cancelled.")
-                 elif isinstance(result, Exception):
-                      logger.error(f"[{client_info}] Error during {task_name} cleanup: {result}", exc_info=result)
-
+                 if isinstance(result, asyncio.CancelledError): logger.info(f"[{client_info}] {task_name} 성공적으로 취소됨.")
+                 elif isinstance(result, Exception): logger.error(f"[{client_info}] {task_name} 정리 중 오류 발생: {result}", exc_info=result)
 
         # 3. 오디오 큐가 비어있는지 확인
         if audio_queue:
@@ -318,14 +354,13 @@ async def websocket_endpoint(websocket: WebSocket):
         # 4. WebSocket 닫기
         try:
             if websocket.client_state == WebSocketState.CONNECTED:
-                logger.info(f"[{client_info}] Closing WebSocket connection explicitly (code 1000)...")
+                logger.info(f"[{client_info}] WebSocket 연결 명시적으로 닫기 (코드 1000)...")
                 await websocket.close(code=1000)
             elif websocket.client_state == WebSocketState.DISCONNECTED:
-                 logger.info(f"[{client_info}] WebSocket already disconnected.")
+                 logger.info(f"[{client_info}] WebSocket이 이미 연결이 끊어졌습니다.")
             else:
-                 logger.warning(f"[{client_info}] WebSocket in unexpected state during cleanup: {websocket.client_state}")
-
+                 logger.warning(f"[{client_info}] 정리 중 WebSocket이 예상치 못한 상태: {websocket.client_state}")
         except Exception as e_close_final:
-            logger.warning(f"[{client_info}] Error closing WebSocket during final cleanup: {e_close_final}", exc_info=True)
+            logger.warning(f"[{client_info}] 최종 정리 중 WebSocket 닫기 오류: {e_close_final}", exc_info=True)
 
-        logger.info(f"WebSocket connection cleanup finished for: {client_info}")
+        logger.info(f"WebSocket 연결 정리 완료: {client_info}")
