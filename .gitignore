@@ -56,6 +56,22 @@ var/
 .installed.cfg
 *.egg
 
+# 특정 경로의 __pycache__
+BackEnd/app/routers/__pycache__/
+BackEnd/app/routers/__pycache__/*
+BackEnd/app/core/__pycache__/
+BackEnd/app/core/__pycache__/*
+BackEnd/app/services/__pycache__/
+BackEnd/app/services/__pycache__/*
+BackEnd/app/models/__pycache__/
+BackEnd/app/models/__pycache__/*
+BackEnd/app/schemas/__pycache__/
+BackEnd/app/schemas/__pycache__/*
+BackEnd/app/database/__pycache__/
+BackEnd/app/database/__pycache__/*
+BackEnd/app/utils/__pycache__/
+BackEnd/app/utils/__pycache__/*
+
 # Virtual Environment
 venv/
 ENV/
