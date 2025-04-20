@@ -8,6 +8,8 @@ from app.services.stt_service import handle_stt_stream, STTTimeoutError
 from app.services.llm_service import stream_llm_response
 from app.services.tts_service import synthesize_speech_stream # 업데이트된 TTS 서비스 임포트
 from google.api_core import exceptions as google_exceptions
+# google.generativeai.errors 임포트 오류 수정
+# 대신 google.api_core.exceptions를 사용하여 429 오류를 처리
 from typing import Set, AsyncIterator # AsyncIterator 임포트
 import os # 오류 확인을 위한 임포트
 
@@ -29,6 +31,7 @@ async def chunk_text_by_punctuation(
     """
     LLM 텍스트 스트림을 비동기적으로 소비하고, 텍스트를 누적하여
     구두점이나 최소 길이로 분할된 청크를 생성하여 더 자연스러운 TTS 입력을 제공합니다.
+    상위 오류를 적절히 처리합니다.
 
     Args:
         llm_stream: LLM에서 텍스트 청크를 생성하는 비동기 이터레이터
@@ -88,12 +91,8 @@ async def chunk_text_by_punctuation(
          logger.info("텍스트 청커 태스크 취소됨.")
          raise
     except Exception as e:
-         logger.error(f"텍스트 청커에서 오류 발생: {e}", exc_info=True)
-         # 오류 발생 전에 남은 청크를 생성 시도
-         if temp_chunk and temp_chunk.strip():
-              try: yield temp_chunk.strip()
-              except Exception: pass
-         raise # 오류를 다시 발생시킴
+         logger.error(f"텍스트 청커 생성기 내부 오류: {e}", exc_info=True)
+         raise # 호출자에게 다시 발생시킴
 
 
 @router.websocket("/audio")
@@ -118,10 +117,12 @@ async def websocket_endpoint(websocket: WebSocket):
     async def handle_llm_and_tts(transcript: str, ws: WebSocket, client_id: str):
         """LLM 응답을 받아 자연스럽게 청킹하고, TTS로 변환하여 WebSocket으로 오디오 청크를 전송합니다."""
         nonlocal is_connected
-        logger.info(f"[{client_id}] 최종 STT 결과로 LLM->청커->TTS 파이프라인 시작: '{transcript[:50]}...'")
+        logger.info(f"[{client_id}] LLM->청커->TTS 파이프라인 시작: '{transcript[:50]}...'")
         llm_stream = None
         processed_text_stream = None
         tts_stream = None
+        error_occurred = False # 프로세스가 오류로 중단되었는지 표시하는 플래그
+
         try:
             # 1. LLM 서비스 호출하여 텍스트 스트림 받기
             llm_stream = stream_llm_response(transcript, client_id)
@@ -135,7 +136,8 @@ async def websocket_endpoint(websocket: WebSocket):
             # 4. 오디오 청크를 WebSocket으로 스트리밍
             async for audio_chunk in tts_stream:
                 if not is_connected:
-                    logger.warning(f"[{client_id}] WebSocket 연결이 끊어져 TTS 오디오 전송 중단.")
+                    logger.warning(f"[{client_id}] TTS 스트림 중 WebSocket 연결이 끊어졌습니다. 중단.")
+                    error_occurred = True # 연결 끊김으로 인한 중단 표시
                     break
 
                 try:
@@ -143,37 +145,68 @@ async def websocket_endpoint(websocket: WebSocket):
                         await ws.send_bytes(audio_chunk)
                         logger.debug(f"[{client_id}] TTS 오디오 청크 전송됨 ({len(audio_chunk)} bytes)")
                     else:
-                         logger.warning(f"[{client_id}] WebSocket이 더 이상 연결되지 않았습니다. TTS 오디오 청크를 전송할 수 없습니다.")
+                         logger.warning(f"[{client_id}] TTS 전송 중 WebSocket이 더 이상 연결되지 않았습니다.")
                          is_connected = False
+                         error_occurred = True
                          break
                 except WebSocketDisconnect:
-                    logger.warning(f"[{client_id}] TTS 오디오 청크 전송 중 WebSocket 연결이 끊어졌습니다.")
+                    logger.warning(f"[{client_id}] 전송 시도 중 WebSocket 연결이 끊어졌습니다.")
                     is_connected = False
+                    error_occurred = True
                     break
                 except Exception as e:
                     logger.warning(f"[{client_id}] TTS 오디오 청크 전송 중 오류: {e}")
                     if isinstance(e, (ConnectionResetError, BrokenPipeError)):
                          is_connected = False
+                    error_occurred = True
                     break
 
-            if is_connected:
+            if not error_occurred and is_connected:
                  logger.info(f"[{client_id}] LLM->청커->TTS 오디오 스트리밍 완료.")
-            else:
-                 logger.warning(f"[{client_id}] 연결 끊김으로 인해 LLM->청커->TTS 오디오 스트리밍이 중단되었습니다.")
 
+        # *** Google API 오류(429 등)에 대한 특별 처리 ***
+        except google_exceptions.ResourceExhausted as e:
+             error_occurred = True
+             error_message = "API 사용량 제한에 도달했습니다. 잠시 후 다시 시도해주세요."
+             logger.warning(f"[{client_id}] LLM API 사용량 제한 오류(429): {e}")
+             
+             # 클라이언트에게 특정 오류 메시지 전송
+             if is_connected and ws.client_state == WebSocketState.CONNECTED:
+                 try:
+                     await ws.send_text(f'{{"error": "{error_message}"}}')
+                 except Exception as send_err:
+                      logger.warning(f"[{client_id}] API 오류 메시지를 클라이언트에게 전송 실패: {send_err}")
+        
+        except google_exceptions.ClientError as e:
+             error_occurred = True
+             error_message = f"LLM API 오류: {type(e).__name__}"
+             logger.error(f"[{client_id}] 파이프라인 중 LLM API ClientError 발생: {e}", exc_info=True)
+             
+             # 클라이언트에게 오류 메시지 전송
+             if is_connected and ws.client_state == WebSocketState.CONNECTED:
+                 try:
+                     await ws.send_text(f'{{"error": "{error_message}"}}')
+                 except Exception as send_err:
+                      logger.warning(f"[{client_id}] API 오류 메시지를 클라이언트에게 전송 실패: {send_err}")
 
         except asyncio.CancelledError:
             logger.info(f"[{client_id}] LLM->청커->TTS 파이프라인 태스크 취소됨.")
+            error_occurred = True # 중단 표시
         except Exception as e:
-            logger.error(f"[{client_id}] LLM->청커->TTS 파이프라인 처리 중 오류 발생: {e}", exc_info=True)
+            error_occurred = True
+            # 위에서 처리되지 않은 청커 또는 TTS 서비스의 잠재적 오류 처리
+            logger.error(f"[{client_id}] LLM->청커->TTS 파이프라인 중 처리되지 않은 오류 발생: {e}", exc_info=True)
             if is_connected and ws.client_state == WebSocketState.CONNECTED:
                 try:
-                    error_message = f"응답 처리 중 서버 오류: {type(e).__name__}"
-                    await ws.send_text(f'{{"error": "{error_message}"}}')
+                    await ws.send_text(f'{{"error": "서버 처리 중 오류가 발생했습니다."}}')
                 except Exception as send_err:
-                     logger.warning(f"[{client_id}] 클라이언트에게 오류 메시지 전송 실패: {send_err}")
+                     logger.warning(f"[{client_id}] 일반 오류 메시지를 클라이언트에게 전송 실패: {send_err}")
         finally:
-             logger.debug(f"[{client_id}] LLM->청커->TTS 파이프라인 태스크 실행 완료.")
+             # 파이프라인이 정상적으로 종료되었는지 또는 오류/연결 끊김으로 인해 종료되었는지 로깅
+             if error_occurred:
+                 logger.warning(f"[{client_id}] LLM->청커->TTS 파이프라인이 오류 또는 연결 끊김으로 인해 종료되었습니다.")
+             else:
+                  logger.debug(f"[{client_id}] LLM->청커->TTS 파이프라인 태스크가 정상적으로 실행 완료되었습니다.")
 
 
     # --- STT 결과 처리 콜백 ---
@@ -186,19 +219,8 @@ async def websocket_endpoint(websocket: WebSocket):
 
         if not is_final:
             logger.debug(f"[{client_info}] 중간 STT 결과: {transcript}")
-            # 선택적으로 중간 결과 전송 (JSON 텍스트)
-            # try:
-            #     if websocket.client_state == WebSocketState.CONNECTED:
-            #         await websocket.send_text(f'{{"transcript": "{transcript}", "is_final": false}}')
-            # except Exception: pass
         else:
             logger.info(f"[{client_info}] 최종 STT 결과: {transcript}")
-            # 선택적으로 최종 텍스트 결과 전송
-            # try:
-            #     if websocket.client_state == WebSocketState.CONNECTED:
-            #          await websocket.send_text(f'{{"transcript": "{transcript}", "is_final": true}}')
-            # except Exception: pass
-
             if transcript and transcript.strip():
                 # LLM->청커->TTS 파이프라인을 별도 태스크로 시작
                 llm_tts_task = asyncio.create_task(
