@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .routers import api_router
 from .core.config import settings
+import os
 
 # 라우터 임포트 (voice 라우터)
 from app.routers import voice
@@ -48,6 +49,6 @@ app.include_router(api_router)
 # 서버 실행을 위한 코드 (개발 환경)
 if __name__ == "__main__":
     logger.info("Starting Uvicorn server in development mode...")
-    # uvicorn.run 에 문자열로 앱 위치 지정: "모듈경로:앱인스턴스"
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+    PORT = int(os.getenv("PORT", "8000"))
+    uvicorn.run("app.main:app", host="0.0.0.0", port=PORT)
 
