@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { WS_URL } from '../constants/env';
 
-// WebSocket 연결 주소 (환경 변수 등으로 관리하는 것이 더 좋습니다)
-const WEBSOCKET_URL = 'ws://localhost:8000/ws/audio'; // 예시: 로컬 FastAPI 백엔드
+// WebSocket 연결 주소를 환경 변수에서 가져옴
+const WEBSOCKET_URL = WS_URL;
 
 // WebSocket 서버로부터 받을 것으로 예상되는 데이터 구조 인터페이스
 interface WebSocketResponse {
