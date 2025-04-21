@@ -11,8 +11,8 @@ class Settings(BaseSettings):
     SERVER_HOST: str = os.getenv("SERVER_HOST", "0.0.0.0") # 서버 호스트 주소
     SERVER_PORT: int = int(os.getenv("PORT", "8080")) # 서버 포트 (PORT 환경 변수 사용)
     
-    # CORS 설정
-    ALLOWED_ORIGINS: List[str] = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",")
+    # CORS 설정 - 모든 오리진 허용
+    ALLOWED_ORIGINS: List[str] = os.getenv("ALLOWED_ORIGINS", "*").split(",")
 
     # Google Cloud 설정
     GOOGLE_CLOUD_PROJECT_ID: str = os.getenv("GOOGLE_CLOUD_PROJECT_ID", "civil-hull-456308-c4") # 기본값 제거, 필수 설정으로 변경
@@ -25,8 +25,8 @@ class Settings(BaseSettings):
     # --- LLM (Gemini) 관련 설정 ---
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-1.5-flash-002") # Vertex AI에서 사용 가능한 모델 확인 필요
     USE_VERTEX_AI: bool = os.getenv("USE_VERTEX_AI", "True").lower() == "true" # 기본값은 True로 설정
-    VERTEX_AI_LOCATION: str = os.getenv("VERTEX_AI_LOCATION", "us-central1") # Vertex AI 리전 설정
-    SYSTEM_INSTRUCTION: str = os.getenv("SYSTEM_INSTRUCTION", "") # .env 파일에서 시스템 지시문 로드
+    VERTEX_AI_LOCATION: str = os.getenv("VERTEX_AI_LOCATION", "asia-northeast3") # Vertex AI 리전 설정
+    SYSTEM_INSTRUCTION: str = os.getenv("SYSTEM_INSTRUCTION", "당신은 친절하고 도움이 되는 음성 비서입니다. 당신의 응답은 간결하고, 대화체이며, 소리 내어 읽었을 때 이해하기 쉬워야 합니다. 사용자의 질문에 직접적이고 짧게 답변하세요. 불필요한 전문 용어나 지나치게 격식적인 언어는 피하세요. 명시적으로 더 자세한 정보가 요청되지 않는 한, 응답을 1-2 문장으로 제한하세요. 최대한 빨리 대답해 주세요.") # .env 파일에서 시스템 지시문 로드
 
     # --- TTS (Text-to-Speech) 설정 추가 ---
     TTS_VOICE_NAME: str = os.getenv("TTS_VOICE_NAME", "ko-KR-Chirp3-HD-Aoede") # 사용할 TTS 음성 이름 (예: ko-KR-Standard-A, ko-KR-Wavenet-A)
