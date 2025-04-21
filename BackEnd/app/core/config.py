@@ -9,7 +9,7 @@ load_dotenv()
 class Settings(BaseSettings):
     # 서버 설정
     SERVER_HOST: str = os.getenv("SERVER_HOST", "0.0.0.0") # 서버 호스트 주소
-    SERVER_PORT: int = int(os.getenv("SERVER_PORT", "8000")) # 서버 포트
+    SERVER_PORT: int = int(os.getenv("PORT", "8080")) # 서버 포트 (PORT 환경 변수 사용)
     
     # CORS 설정
     ALLOWED_ORIGINS: List[str] = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",")
