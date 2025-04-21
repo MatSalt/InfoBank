@@ -17,6 +17,7 @@ export default function VoiceChatPage() { // 간단한 함수 선언 방식 사�
     isMicDisabled,    // 추가된 상태
     micStatusMessage,  // 추가된 상태
     isPlayingAudio,    // 추가: 현재 오디오 재생 중인지 상태
+    processingTime,    // 추가: 처리 시간
   } = useVoiceStreaming();
 
   // JSX 반환 (타입: JSX.Element)
@@ -86,6 +87,15 @@ export default function VoiceChatPage() { // 간단한 함수 선언 방식 사�
             <div className="flex-shrink-0 w-4 h-4 rounded-full bg-green-500 animate-pulse"></div>
             <p className="text-green-600">
               🔊 AI 음성 응답 재생 중...
+            </p>
+          </div>
+        )}
+
+        {/* 처리 시간 표시 */}
+        {processingTime !== null && (
+          <div className="mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <p className="text-yellow-700 font-medium">
+              ⏱️ 응답 처리 시간: {processingTime.toFixed(2)}초
             </p>
           </div>
         )}

@@ -27,6 +27,7 @@ interface UseVoiceStreamingReturn {
   isMicDisabled: boolean;
   micStatusMessage: string;
   isPlayingAudio: boolean;
+  processingTime: number | null;
 }
 
 // 전역 Window 인터페이스 확장
@@ -51,6 +52,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
   const [isMicDisabled, setIsMicDisabled] = useState<boolean>(false);
   const [micStatusMessage, setMicStatusMessage] = useState<string>('');
   const [isPlayingAudio, setIsPlayingAudio] = useState<boolean>(false);
+  const [processingTime, setProcessingTime] = useState<number | null>(null);
 
   // useRef (타입 명시, 초기값 null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -66,6 +68,10 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
   const pendingMicEnableRef = useRef<boolean>(false);
   const pendingMicMessageRef = useRef<string>('');
 
+  // 추가할 상태 변수들
+  const micDisabledTimeRef = useRef<number | null>(null);
+  const isFirstAudioChunkRef = useRef<boolean>(true);
+
   // 브라우저 지원 여부 확인
   useEffect(() => {
     setIsSupported(!!(navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function' && window.WebSocket));
@@ -74,7 +80,6 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
   // 마이크 활성화 함수를 먼저 선언
   const enableMicrophone = useCallback((message: string) => {
     if (audioStreamRef.current) {
-      // 약간의 지연 후 마이크 활성화
       setTimeout(() => {
         if (audioStreamRef.current) {
           audioStreamRef.current.getAudioTracks().forEach(track => {
@@ -84,10 +89,14 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
           setIsMicDisabled(false);
           setMicStatusMessage('');
           setStatusMessage(message);
+          
+          // 마이크가 다시 활성화될 때 시간 측정 변수 초기화
+          // 주의: processingTime은 초기화하지 않고 유지 (화면에 계속 표시)
+          micDisabledTimeRef.current = null;
+          isFirstAudioChunkRef.current = true;
         }
-        // 마이크 활성화 플래그 초기화
         pendingMicEnableRef.current = false;
-      }, 300); // 300ms 지연
+      }, 300);
     }
   }, []);
 
@@ -157,6 +166,15 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
   const playAudioChunk = useCallback(async (audioData: Uint8Array): Promise<void> => {
     return new Promise((resolve, reject) => {
       try {
+        // 첫 번째 오디오 청크인 경우 처리 시간 계산
+        if (isFirstAudioChunkRef.current && micDisabledTimeRef.current !== null) {
+          const firstAudioTime = Date.now();
+          const timeTaken = (firstAudioTime - micDisabledTimeRef.current) / 1000; // 초 단위로 변환
+          setProcessingTime(timeTaken);
+          console.log(`첫 오디오 재생까지 소요 시간: ${timeTaken.toFixed(2)}초`);
+          isFirstAudioChunkRef.current = false;
+        }
+
         // --- 백엔드 TTS와 일치하는 샘플링 레이트 ---
         const SAMPLE_RATE = 24000; // 백엔드에서 설정한 값 (예: 24000)
 
@@ -293,7 +311,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
                 // 마이크 제어 메시지 처리
                 if (data.control === 'mic_status') {
                   if (data.action === 'disable') {
-                    // 마이크 즉시 비활성화
+                    // 마이크 비활성화 시간 기록
                     if (audioStreamRef.current) {
                       console.log('마이크 비활성화:', data.reason);
                       audioStreamRef.current.getAudioTracks().forEach(track => {
@@ -301,9 +319,11 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
                       });
                       setIsMicDisabled(true);
                       setMicStatusMessage(data.message || 'AI가 응답 중입니다...');
-                      
-                      // 상태 표시 업데이트
                       setStatusMessage(data.message || 'AI가 응답 중입니다...');
+                      
+                      // 마이크 비활성화 시간 기록
+                      micDisabledTimeRef.current = Date.now();
+                      isFirstAudioChunkRef.current = true; // 첫 오디오 플래그 초기화
                     }
                   } else if (data.action === 'enable') {
                     // 마이크 활성화 요청을 즉시 처리하지 않고 플래그로 저장
@@ -519,5 +539,6 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
     isMicDisabled,
     micStatusMessage,
     isPlayingAudio,
+    processingTime,
   };
 }
