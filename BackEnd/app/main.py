@@ -11,7 +11,7 @@ from app.routers import voice
 
 # 로깅 설정
 logging.basicConfig(
-    level=logging.INFO,  # DEBUG에서 INFO로 변경
+    level=logging.INFO, 		# DEBUG, INFO, WARNING, ERROR, CRITICAL
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
