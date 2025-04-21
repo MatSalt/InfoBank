@@ -6,7 +6,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from .routers import api_router
 from .core.config import settings
 import os
-
 # 라우터 임포트 (voice 라우터)
 from app.routers import voice
 
@@ -28,7 +27,7 @@ app = FastAPI(
 # CORS 설정
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 개발 환경에서는 모든 오리진 허용
+    allow_origins=settings.ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -49,6 +48,5 @@ app.include_router(api_router)
 # 서버 실행을 위한 코드 (개발 환경)
 if __name__ == "__main__":
     logger.info("Starting Uvicorn server in development mode...")
-    PORT = int(os.getenv("PORT", "8000"))
-    uvicorn.run("app.main:app", host="0.0.0.0", port=PORT)
+    uvicorn.run("app.main:app", host=settings.SERVER_HOST, port=settings.SERVER_PORT)
 
