@@ -240,8 +240,9 @@ async def websocket_endpoint(websocket: WebSocket):
         
         logger.info(f"[{client_info}] 최종 STT 결과 수신: '{transcript[:50]}...'")
         
-        # 이전 LLM/TTS 태스크 취소 및 정리
-        for task in llm_tts_tasks:
+        # 이전 LLM/TTS 태스크 취소 및 정리 (세트의 복사본을 사용하여 순회)
+        tasks_to_cancel = list(llm_tts_tasks)  # 세트의 복사본 생성
+        for task in tasks_to_cancel:
             if not task.done():
                 task.cancel()
                 try:
@@ -251,7 +252,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 except Exception as e:
                     logger.warning(f"[{client_info}] 이전 LLM/TTS 태스크 취소 중 오류: {e}")
         
-        llm_tts_tasks.clear()
+        llm_tts_tasks.clear()  # 모든 태스크 제거
         
         # 새 LLM/TTS 태스크 시작
         task = asyncio.create_task(handle_llm_and_tts(transcript, websocket, client_info))
