@@ -8,6 +8,10 @@ interface WebSocketResponse {
   transcript?: string;
   is_final?: boolean;
   error?: string; // 백엔드 에러 메시지 필드 (선택 사항)
+  control?: string;
+  action?: string;
+  reason?: string;
+  message?: string;
 }
 
 // 커스텀 훅의 반환 타입 인터페이스
@@ -20,6 +24,9 @@ interface UseVoiceStreamingReturn {
   transcript: string;
   startRecording: () => Promise<void>;
   stopRecording: () => void;
+  isMicDisabled: boolean;
+  micStatusMessage: string;
+  isPlayingAudio: boolean;
 }
 
 // 전역 Window 인터페이스 확장
@@ -41,6 +48,9 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
   const [isSupported, setIsSupported] = useState<boolean>(false);
   const [isConnecting, setIsConnecting] = useState<boolean>(false);
   const [transcript, setTranscript] = useState<string>('');
+  const [isMicDisabled, setIsMicDisabled] = useState<boolean>(false);
+  const [micStatusMessage, setMicStatusMessage] = useState<string>('');
+  const [isPlayingAudio, setIsPlayingAudio] = useState<boolean>(false);
 
   // useRef (타입 명시, 초기값 null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -52,9 +62,33 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
   const audioQueueRef = useRef<Uint8Array[]>([]);
   const isPlayingRef = useRef<boolean>(false);
 
+  // 마이크 활성화 대기 플래그 추가
+  const pendingMicEnableRef = useRef<boolean>(false);
+  const pendingMicMessageRef = useRef<string>('');
+
   // 브라우저 지원 여부 확인
   useEffect(() => {
     setIsSupported(!!(navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function' && window.WebSocket));
+  }, []);
+
+  // 마이크 활성화 함수를 먼저 선언
+  const enableMicrophone = useCallback((message: string) => {
+    if (audioStreamRef.current) {
+      // 약간의 지연 후 마이크 활성화
+      setTimeout(() => {
+        if (audioStreamRef.current) {
+          audioStreamRef.current.getAudioTracks().forEach(track => {
+            track.enabled = true;
+          });
+          console.log('마이크가 활성화되었습니다.');
+          setIsMicDisabled(false);
+          setMicStatusMessage('');
+          setStatusMessage(message);
+        }
+        // 마이크 활성화 플래그 초기화
+        pendingMicEnableRef.current = false;
+      }, 300); // 300ms 지연
+    }
   }, []);
 
   // 오디오 스트림 중지 함수
@@ -121,7 +155,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
 
   // 오디오 재생 함수
   const playAudioChunk = useCallback(async (audioData: Uint8Array): Promise<void> => {
-    return new Promise((resolve, reject) => { // Promise를 반환하도록 수정 (재생 완료 시 resolve)
+    return new Promise((resolve, reject) => {
       try {
         // --- 백엔드 TTS와 일치하는 샘플링 레이트 ---
         const SAMPLE_RATE = 24000; // 백엔드에서 설정한 값 (예: 24000)
@@ -170,6 +204,9 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
         source.buffer = audioBuffer;
         source.connect(audioContext.destination);
 
+        // 재생 시작 로깅
+        console.log(`오디오 청크 재생 시작 (${audioData.length} bytes)`);
+        
         // 재생 완료 시 Promise를 resolve하고 소스 정리
         source.onended = () => {
           console.log(`오디오 청크 재생 완료 (${audioData.length} bytes)`);
@@ -181,45 +218,50 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
 
       } catch (error) {
         console.error('오디오 재생 함수 내 오류 발생:', error);
-        // 오류 발생 시 재생 상태 초기화 등 고려
         isPlayingRef.current = false; // 재생 실패 시 상태 업데이트
         reject(error); // Promise 실패 알림
       }
-    }); // Promise 종료
-  }, []); // 의존성 배열 비우기 (내부에서 사용하는 상태/ref는 의존성이 아님)
+    });
+  }, []);
 
-  // 오디오 큐 처리 함수 (재생 완료를 기다리도록 수정)
+  // 그 다음에 processAudioQueue 함수 선언
   const processAudioQueue = useCallback(async (): Promise<void> => {
-      // 이미 재생 중이거나 큐가 비었으면 반환
-      if (isPlayingRef.current || audioQueueRef.current.length === 0) return;
+    if (isPlayingRef.current || audioQueueRef.current.length === 0) return;
 
-      isPlayingRef.current = true; // 재생 시작 플래그 설정
-      console.log("오디오 큐 처리 시작...");
+    isPlayingRef.current = true;
+    setIsPlayingAudio(true); // UI 상태 업데이트
+    console.log(`오디오 큐 처리 시작... (${audioQueueRef.current.length}개 항목)`);
 
-      // 큐에 있는 모든 오디오 데이터를 순차적으로 재생
-      while (audioQueueRef.current.length > 0) {
-        const audioData = audioQueueRef.current.shift(); // 큐에서 하나 꺼냄
-        if (audioData) {
-          try {
-            console.log(`다음 오디오 청크 재생 시도 (${audioData.length} bytes)...`);
-            // playAudioChunk가 반환하는 Promise를 기다려서 재생이 완료될 때까지 대기
-            await playAudioChunk(audioData);
-            console.log("이전 오디오 청크 재생 완료.");
-          } catch (error) {
-              console.error("오디오 큐 처리 중 playAudioChunk 오류:", error);
-              // 오류 발생 시 큐 처리 중단 또는 계속 진행 결정
-              // 여기서는 일단 중단하고 재생 상태 해제
-              isPlayingRef.current = false;
-              console.log("오디오 큐 처리 중 오류로 인해 중단됨.");
-              return; // 함수 종료
-          }
+    // 큐에 있는 모든 오디오 데이터를 순차적으로 재생
+    while (audioQueueRef.current.length > 0) {
+      const audioData = audioQueueRef.current.shift(); // 큐에서 하나 꺼냄
+      if (audioData) {
+        try {
+          console.log(`다음 오디오 청크 재생 시도 (${audioData.length} bytes)...`);
+          // playAudioChunk가 반환하는 Promise를 기다려서 재생이 완료될 때까지 대기
+          await playAudioChunk(audioData);
+          console.log("이전 오디오 청크 재생 완료.");
+        } catch (error) {
+            console.error("오디오 큐 처리 중 playAudioChunk 오류:", error);
+            // 오류 발생 시 큐 처리 중단 또는 계속 진행 결정
+            // 여기서는 일단 중단하고 재생 상태 해제
+            isPlayingRef.current = false;
+            console.log("오디오 큐 처리 중 오류로 인해 중단됨.");
+            return; // 함수 종료
         }
       }
+    }
 
-      // 모든 큐 처리가 성공적으로 완료되면 재생 상태 해제
-      isPlayingRef.current = false;
-      console.log("오디오 큐 처리 완료.");
-  }, [playAudioChunk]); // playAudioChunk 함수에 의존
+    // 모든 큐 처리가 성공적으로 완료되면 재생 상태 해제
+    isPlayingRef.current = false;
+    setIsPlayingAudio(false); // UI 상태 업데이트
+    console.log("오디오 큐 처리 완료.");
+    
+    if (pendingMicEnableRef.current) {
+      console.log("모든 오디오 재생 완료 후 마이크 활성화 실행");
+      enableMicrophone(pendingMicMessageRef.current);
+    }
+  }, [playAudioChunk, enableMicrophone]); // playAudioChunk 함수에 의존
 
   // WebSocket 연결 설정 함수
   const setupWebSocket = useCallback((): Promise<WebSocket> => {
@@ -246,7 +288,38 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
         if (typeof event.data === 'string') {
             console.log('WebSocket 텍스트 메시지 수신:', event.data);
              try {
-                const data = JSON.parse(event.data) as WebSocketResponse; // 타입 단언 사용
+                const data = JSON.parse(event.data) as WebSocketResponse;
+                
+                // 마이크 제어 메시지 처리
+                if (data.control === 'mic_status') {
+                  if (data.action === 'disable') {
+                    // 마이크 즉시 비활성화
+                    if (audioStreamRef.current) {
+                      console.log('마이크 비활성화:', data.reason);
+                      audioStreamRef.current.getAudioTracks().forEach(track => {
+                        track.enabled = false;
+                      });
+                      setIsMicDisabled(true);
+                      setMicStatusMessage(data.message || 'AI가 응답 중입니다...');
+                      
+                      // 상태 표시 업데이트
+                      setStatusMessage(data.message || 'AI가 응답 중입니다...');
+                    }
+                  } else if (data.action === 'enable') {
+                    // 마이크 활성화 요청을 즉시 처리하지 않고 플래그로 저장
+                    console.log('마이크 활성화 요청 받음 - 오디오 재생 완료 후 처리 예정:', data.reason);
+                    pendingMicEnableRef.current = true;
+                    pendingMicMessageRef.current = data.message || '말씀하세요...';
+                    
+                    // 오디오 큐가 비어있는 경우에만 즉시 활성화
+                    if (audioQueueRef.current.length === 0 && !isPlayingRef.current) {
+                      enableMicrophone(pendingMicMessageRef.current);
+                    } else {
+                      console.log(`아직 ${audioQueueRef.current.length}개의 오디오가 큐에 있고, 재생 중 상태: ${isPlayingRef.current}`);
+                    }
+                  }
+                }
+                
                 if (data.transcript) {
                     setTranscript(prev => prev + data.transcript);
                     setStatusMessage('텍스트 수신 중...');
@@ -261,10 +334,8 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
                     // 서버 오류 시 녹음 중지 등 추가 처리 가능
                     stopRecording();
                  }
-             } catch {
-                console.warn("Received non-JSON string message:", event.data);
-                // 단순 텍스트 응답 처리 (필요한 경우)
-                setTranscript(prev => prev + event.data);
+             } catch (e) {
+                console.error('JSON 파싱 오류:', e);
              }
         } else if (event.data instanceof ArrayBuffer) {
              // 서버에서 오디오 데이터를 보낸 경우의 처리 (TTS 결과 재생)
@@ -427,6 +498,14 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
     };
   }, [stopRecording]);
 
+  // 추가: 컴포넌트 언마운트 시 정리
+  useEffect(() => {
+    return () => {
+      // 컴포넌트 언마운트 시 플래그 초기화
+      pendingMicEnableRef.current = false;
+    };
+  }, []);
+
   // 반환 객체
   return {
     isRecording,
@@ -436,6 +515,9 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
     isConnecting,
     transcript,
     startRecording,
-    stopRecording
+    stopRecording,
+    isMicDisabled,
+    micStatusMessage,
+    isPlayingAudio,
   };
 }

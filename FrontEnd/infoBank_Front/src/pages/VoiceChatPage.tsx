@@ -14,6 +14,9 @@ export default function VoiceChatPage() { // 간단한 함수 선언 방식 사�
     transcript,
     startRecording,
     stopRecording,
+    isMicDisabled,    // 추가된 상태
+    micStatusMessage,  // 추가된 상태
+    isPlayingAudio,    // 추가: 현재 오디오 재생 중인지 상태
   } = useVoiceStreaming();
 
   // JSX 반환 (타입: JSX.Element)
@@ -21,6 +24,39 @@ export default function VoiceChatPage() { // 간단한 함수 선언 방식 사�
     <div className="flex flex-col items-center justify-center w-full h-full min-h-screen bg-gradient-to-b from-purple-100 to-purple-300 font-sans p-4">
       <div className="w-full max-w-md p-6 bg-white rounded-xl shadow-lg text-center">
         <h1 className="text-2xl font-bold mb-4 text-gray-800">AI 음성 대화</h1>
+
+        {/* 마이크 상태 표시 - 시각적 피드백 추가 */}
+        <div className={`relative mx-auto w-20 h-20 rounded-full flex items-center justify-center mb-4 transition-all duration-300
+          ${isMicDisabled 
+            ? 'bg-red-100 border-2 border-red-400' 
+            : isRecording 
+              ? 'bg-green-100 border-2 border-green-500 animate-pulse' 
+              : 'bg-gray-100 border-2 border-gray-300'}`}>
+          
+          {/* 마이크 아이콘 */}
+          <svg 
+            className={`w-10 h-10 transition-all duration-300 ${isMicDisabled ? 'text-red-500' : isRecording ? 'text-green-600' : 'text-gray-500'}`} 
+            fill="none" 
+            stroke="currentColor" 
+            viewBox="0 0 24 24" 
+            xmlns="http://www.w3.org/2000/svg">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+          </svg>
+          
+          {/* 마이크 비활성화 시 X 표시 */}
+          {isMicDisabled && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <svg className="w-16 h-16 text-red-500 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </div>
+          )}
+        </div>
+        
+        {/* 마이크 상태 메시지 */}
+        <p className={`text-sm font-medium mb-4 ${isMicDisabled ? 'text-red-500' : 'text-gray-600'}`}>
+          {isMicDisabled ? micStatusMessage : (isRecording ? '녹음 중...' : '대기 중')}
+        </p>
 
         {/* 브라우저 지원 여부 메시지 */}
         {!isSupported && (
@@ -32,17 +68,39 @@ export default function VoiceChatPage() { // 간단한 함수 선언 방식 사�
         {/* 상태 메시지 표시 */}
         <p className={`text-lg text-gray-600 mb-6 h-6 ${isConnecting ? 'animate-pulse' : ''}`}>{statusMessage}</p>
 
+        {/* 오디오 및 마이크 상태 표시 - 확장 */}
+        <div className={`mt-4 p-3 ${isMicDisabled ? 'bg-red-50 border border-red-200' : 'bg-blue-50'} rounded-lg flex items-center gap-2`}>
+          {isMicDisabled && (
+            <div className="flex-shrink-0 w-4 h-4 rounded-full bg-red-500 animate-pulse"></div>
+          )}
+          <p className={`${isMicDisabled ? 'text-red-600' : 'text-blue-600'}`}>
+            {isMicDisabled 
+              ? `🔇 마이크 비활성화됨: ${micStatusMessage || 'AI가 응답 중입니다...'}`
+              : '🎤 마이크가 활성화되었습니다. 말씀하세요.'}
+          </p>
+        </div>
+        
+        {/* 오디오 재생 상태 표시 */}
+        {isPlayingAudio && (
+          <div className="mt-2 p-3 bg-green-50 border border-green-200 rounded-lg flex items-center gap-2">
+            <div className="flex-shrink-0 w-4 h-4 rounded-full bg-green-500 animate-pulse"></div>
+            <p className="text-green-600">
+              🔊 AI 음성 응답 재생 중...
+            </p>
+          </div>
+        )}
+
         {/* 시작/중지 버튼 */}
         <button
           onClick={isRecording ? stopRecording : startRecording}
-          disabled={!isSupported || isConnecting} // 미지원 또는 연결 중일 때 비활성화
+          disabled={!isSupported || isConnecting || isMicDisabled} // 마이크 비활성화 시 버튼도 비활성화
           className={`w-full px-6 py-4 rounded-lg text-white font-semibold shadow-md transition-all duration-300 ease-in-out ${
             isRecording
-              ? 'bg-red-500 hover:bg-red-600 animate-pulse' // 녹음 중일 때 빨간색 및 애니메이션
-              : 'bg-purple-600 hover:bg-purple-700' // 기본 상태 보라색
-          } ${(!isSupported || isConnecting) ? 'opacity-50 cursor-not-allowed' : ''}`} // 비활성화 스타일
+              ? 'bg-red-500 hover:bg-red-600 animate-pulse' 
+              : 'bg-purple-600 hover:bg-purple-700'
+          } ${(!isSupported || isConnecting || isMicDisabled) ? 'opacity-50 cursor-not-allowed' : ''}`}
         >
-          {isRecording ? '🔴 녹음 중지' : (isConnecting ? '연결 중...' : '🎤 대화 시작')}
+          {isRecording ? '🔴 녹음 중지' : (isConnecting ? '연결 중...' : (isMicDisabled ? '처리 중...' : '🎤 대화 시작'))}
         </button>
 
         {/* 인식된 텍스트 표시 영역 */}
