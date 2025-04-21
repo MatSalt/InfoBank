@@ -1,0 +1,63 @@
+# Git 관련 파일
+.git
+.gitignore
+
+# Python 가상 환경
+venv/
+.venv/
+env/
+ENV/
+
+# Python 캐시 파일
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE/에디터 설정 파일
+.vscode/
+.idea/
+*.swp
+*.swo
+.vs/
+
+# 운영체제 파일
+.DS_Store
+Thumbs.db
+
+# 로컬 환경 설정 파일 (Cloud Run에서는 환경 변수로 주입)
+.env
+.env.*
+!.env.example
+
+# 로그 파일
+*.log
+logs/
+
+# 테스트 및 문서 파일
+tests/
+docs/
+README.md
+*.md
+
+# 빌드 및 배포 관련 파일
+.dockerignore
+Dockerfile.*
+docker-compose*
+.github/
+.gitlab-ci.yml
+
+# 개발 전용 파일
+*.sh
+*.bat
+*.cmd
+*.ps1
+
+# 임시 파일
+tmp/
+temp/
+.tmp/
+.temp/ 
