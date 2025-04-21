@@ -108,6 +108,11 @@ async def stream_llm_response(
     
     logger.info(f"[{client_info}] LLM 요청 시작 (Vertex AI - Chats Interface): '{text[:50]}...'")
     
+    # 시스템 지시문이 있는지 확인
+    system_instruction = settings.SYSTEM_INSTRUCTION
+    if system_instruction:
+        logger.info(f"[{client_info}] 시스템 지시문 포함: '{system_instruction[:50]}...'")
+    
     # 새 세션 요청이면 기존 세션 초기화
     if new_session:
         chat_session_manager.clear_session(user_id)
@@ -119,8 +124,13 @@ async def stream_llm_response(
     try:
         # 스트리밍 응답 생성 요청 (동기 함수를 별도 스레드에서 실행)
         def send_message_sync():
-            # generation_config, safety_settings 등은 필요시 추가 가능
-            return chat_session.send_message_stream(text)
+            # 시스템 지시문이 있을 경우 텍스트 앞에 추가
+            if system_instruction:
+                combined_text = f"{system_instruction}\n\nUser: {text}"
+                return chat_session.send_message_stream(combined_text)
+            else:
+                # 기존 방식대로 단순 텍스트만 전달
+                return chat_session.send_message_stream(text)
 
         # 동기 스트림을 비동기적으로 처리하기 위한 래퍼
         response_stream = await asyncio.to_thread(send_message_sync)

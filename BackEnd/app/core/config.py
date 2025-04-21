@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-1.5-flash-002") # Vertex AI에서 사용 가능한 모델 확인 필요
     USE_VERTEX_AI: bool = os.getenv("USE_VERTEX_AI", "True").lower() == "true" # 기본값은 True로 설정
     VERTEX_AI_LOCATION: str = os.getenv("VERTEX_AI_LOCATION", "us-central1") # Vertex AI 리전 설정
+    SYSTEM_INSTRUCTION: str = os.getenv("SYSTEM_INSTRUCTION", "") # .env 파일에서 시스템 지시문 로드
 
     # --- TTS (Text-to-Speech) 설정 추가 ---
     TTS_VOICE_NAME: str = os.getenv("TTS_VOICE_NAME", "ko-KR-Chirp3-HD-Aoede") # 사용할 TTS 음성 이름 (예: ko-KR-Standard-A, ko-KR-Wavenet-A)
