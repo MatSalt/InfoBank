@@ -85,3 +85,6 @@ ENV/
 *.mp3
 *.ogg
 
+# Live2D Project
+my-live2d-project/
+
