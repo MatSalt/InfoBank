@@ -95,7 +95,7 @@ const Live2DCanvas = ({ modelPath }) => {
       // modelRef.current.internalModel.coreModel.setParameterValueById('ParamMouthForm', randomMouthFormValue);
 
       // ParamMouthForm 스무딩 적용
-      const mouthFormSmoothingFactor = 0.25; // 스무딩 강도 (0~1, 작을수록 느림)
+      const mouthFormSmoothingFactor = 0.2; // 스무딩 강도 (0~1, 작을수록 느림)
       let targetMouthFormValue;
       if (valueToSet >= 0.1) {
         // 목표 랜덤 값 생성 (-1 ~ 1)
@@ -108,6 +108,9 @@ const Live2DCanvas = ({ modelPath }) => {
       // 현재 값에서 목표 값으로 스무딩
       currentMouthFormValueRef.current = currentMouthFormValueRef.current * (1 - mouthFormSmoothingFactor) + targetMouthFormValue * mouthFormSmoothingFactor;
       modelRef.current.internalModel.coreModel.setParameterValueById('ParamMouthForm', currentMouthFormValueRef.current);
+
+      // 콘솔 로그 추가: 두 파라미터 값 출력
+    //   console.log({ ParamMouthOpenY: valueToSet.toFixed(4), ParamMouthForm: currentMouthFormValueRef.current.toFixed(4) });
 
     } catch (error) {
       // 파라미터 설정 오류는 자주 발생할 수 있으므로, 에러 레벨을 낮추거나 필터링 고려
