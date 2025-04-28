@@ -68,11 +68,11 @@ const Live2DCanvas = ({ modelPath }) => {
 
       // RMS 값(일반적으로 0 ~ 0.7 범위)을 립싱크 값(0 ~ 1)으로 매핑
       // 증폭 계수(예: 1.5 또는 2.0)를 조절하여 입 움직임 크기 조절
-      const amplification = 1.8; // 이 값을 조절해보세요
+      const amplification = 4.0; // 값 증가 (예: 1.8 -> 2.8)
       valueToSet = Math.min(1.0, rms * amplification); // 1.0을 넘지 않도록 제한
 
       // 스무딩 적용 (선택 사항, 값을 부드럽게 변화시킴)
-      const smoothingFactor = 0.7; // 0(반응 빠름) ~ 1(반응 느림) 사이 값
+      const smoothingFactor = 0.4; // 값 감소 (예: 0.7 -> 0.5)
       currentLipSyncValueRef.current = currentLipSyncValueRef.current * smoothingFactor + valueToSet * (1 - smoothingFactor);
       valueToSet = currentLipSyncValueRef.current;
 
