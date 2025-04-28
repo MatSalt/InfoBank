@@ -15,6 +15,7 @@ const Live2DCanvas = ({ modelPath }) => {
   // const audioProcessorRef = useRef(null); // 제거
   const dataArrayRef = useRef(null); // AnalyserNode 데이터 배열 ref
   const currentLipSyncValueRef = useRef(0); // 스무딩된 값 저장용 ref
+  const currentMouthFormValueRef = useRef(1); // ParamMouthForm 스무딩 값 저장용 ref (초기값 1)
   // const [lipSyncEnabled, setLipSyncEnabled] = useState(false); // isAudioPlaying으로 대체
   // const [lipSyncParams, setLipSyncParams] = useState(null); // 모델 로드 시 직접 설정
 
@@ -88,6 +89,26 @@ const Live2DCanvas = ({ modelPath }) => {
     try {
       // 계산된 값으로 입 모양 파라미터 설정
       modelRef.current.internalModel.coreModel.setParameterValueById('ParamMouthOpenY', valueToSet);
+
+      // ParamMouthForm을 랜덤하게 설정 (-1 ~ 1) - 오디오 재생 중일 때는 랜덤, 멈추면 1
+      // const randomMouthFormValue = isAudioPlaying ? (Math.random() * 2) - 1 : 1;
+      // modelRef.current.internalModel.coreModel.setParameterValueById('ParamMouthForm', randomMouthFormValue);
+
+      // ParamMouthForm 스무딩 적용
+      const mouthFormSmoothingFactor = 0.3; // 스무딩 강도 (0~1, 작을수록 느림)
+      let targetMouthFormValue;
+      if (isAudioPlaying) {
+        // 목표 랜덤 값 생성 (-1 ~ 1)
+        // 매번 생성하기보다 일정 간격으로 목표값을 바꾸는 것도 고려 가능
+        targetMouthFormValue = (Math.random() * 2) - 1;
+      } else {
+        // 오디오 멈추면 목표값 1
+        targetMouthFormValue = 1;
+      }
+      // 현재 값에서 목표 값으로 스무딩
+      currentMouthFormValueRef.current = currentMouthFormValueRef.current * (1 - mouthFormSmoothingFactor) + targetMouthFormValue * mouthFormSmoothingFactor;
+      modelRef.current.internalModel.coreModel.setParameterValueById('ParamMouthForm', currentMouthFormValueRef.current);
+
     } catch (error) {
       // 파라미터 설정 오류는 자주 발생할 수 있으므로, 에러 레벨을 낮추거나 필터링 고려
       // console.error('립싱크 파라미터 업데이트 오류:', error);
