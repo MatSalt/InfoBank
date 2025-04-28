@@ -73,7 +73,7 @@ const Live2DCanvas = ({ modelPath }) => {
       valueToSet = Math.min(1.0, rms * amplification); // 1.0을 넘지 않도록 제한
 
       // 스무딩 적용 (선택 사항, 값을 부드럽게 변화시킴)
-      const smoothingFactor = 0.4; // 값 감소 (예: 0.7 -> 0.5)
+      const smoothingFactor = 0.55; // 값 감소 (예: 0.7 -> 0.5)
       currentLipSyncValueRef.current = currentLipSyncValueRef.current * smoothingFactor + valueToSet * (1 - smoothingFactor);
       valueToSet = currentLipSyncValueRef.current;
 
@@ -97,7 +97,7 @@ const Live2DCanvas = ({ modelPath }) => {
       // ParamMouthForm 스무딩 적용
       const mouthFormSmoothingFactor = 0.3; // 스무딩 강도 (0~1, 작을수록 느림)
       let targetMouthFormValue;
-      if (isAudioPlaying) {
+      if (valueToSet >= 0.1) {
         // 목표 랜덤 값 생성 (-1 ~ 1)
         // 매번 생성하기보다 일정 간격으로 목표값을 바꾸는 것도 고려 가능
         targetMouthFormValue = (Math.random() * 2) - 1;
