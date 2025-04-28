@@ -16,7 +16,6 @@ const VoiceChatWithLive2D: React.FC = () => {
     stopRecording,
     isMicDisabled,
     micStatusMessage,
-    isPlayingAudio,
     processingTime,
     lastAudioData,
   } = useVoiceStreaming();

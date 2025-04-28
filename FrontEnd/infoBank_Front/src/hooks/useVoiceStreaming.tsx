@@ -36,6 +36,8 @@ interface UseVoiceStreamingReturn {
   isMicDisabled: boolean;
   micStatusMessage: string;
   processingTime: number | null;
+  isPlayingAudio: boolean;
+  lastAudioData: Float32Array | null;
 }
 
 // 전역 Window 인터페이스 확장
@@ -71,6 +73,8 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
   const [isMicDisabled, setIsMicDisabled] = useState<boolean>(false);
   const [micStatusMessage, setMicStatusMessage] = useState<string>('');
   const [processingTime, setProcessingTime] = useState<number | null>(null);
+  const [isPlayingAudio, setIsPlayingAudio] = useState<boolean>(false);
+  const [lastAudioData, setLastAudioData] = useState<Float32Array | null>(null);
 
   // useRef (타입 명시, 초기값 null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -232,7 +236,9 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
           // Normalize to Float32 range (-1.0 to 1.0)
           channelData[i] = int16Value / 32768.0;
         }
-        // ---------------------------------------------------
+        // --- 오디오 데이터 상태 업데이트 추가 ---
+        setLastAudioData(channelData);
+        // ------------------------------------
 
         // 수동으로 생성된 AudioBuffer를 사용하여 소스 노드 생성
         const source = audioContext.createBufferSource();
@@ -278,7 +284,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
     if (isPlayingRef.current || audioQueueRef.current.length === 0) return;
 
     isPlayingRef.current = true;
-    // setIsPlayingAudio(true); // UI 상태 업데이트는 AudioContext에서 하므로 여기서 제거
+    setIsPlayingAudio(true); // UI 상태 업데이트: 재생 시작
     console.log(`오디오 큐 처리 시작... (${audioQueueRef.current.length}개 항목)`);
 
     // 큐에 있는 모든 오디오 데이터를 순차적으로 재생
@@ -295,6 +301,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
             // 오류 발생 시 큐 처리 중단 또는 계속 진행 결정
             // 여기서는 일단 중단하고 재생 상태 해제
             isPlayingRef.current = false;
+            setIsPlayingAudio(false); // UI 상태 업데이트: 재생 중지 (오류)
             clearAudio(); // 오류 시에도 상태 초기화
             console.log("오디오 큐 처리 중 오류로 인해 중단 및 clearAudio 호출됨.");
             return; // 함수 종료
@@ -304,7 +311,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
 
     // 모든 큐 처리가 성공적으로 완료되면 재생 상태 해제
     isPlayingRef.current = false;
-    // setIsPlayingAudio(false); // UI 상태 업데이트는 AudioContext에서 하므로 여기서 제거
+    setIsPlayingAudio(false); // UI 상태 업데이트: 재생 중지 (완료)
     clearAudio(); // 모든 오디오 재생 완료 후 상태 초기화
     console.log("오디오 큐 처리 완료 및 clearAudio 호출됨.");
 
@@ -587,5 +594,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
     isMicDisabled,
     micStatusMessage,
     processingTime,
+    isPlayingAudio,
+    lastAudioData,
   };
 }
