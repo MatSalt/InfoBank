@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { WS_URL } from '../constants/env';
+import { useAudio } from '../contexts/AudioContext'; // 오디오 컨텍스트 추가
 
 // WebSocket 연결 주소를 환경 변수에서 가져옴
 const WEBSOCKET_URL = WS_URL;
@@ -29,6 +30,7 @@ interface UseVoiceStreamingReturn {
   micStatusMessage: string;
   isPlayingAudio: boolean;
   processingTime: number | null;
+  lastAudioData: Uint8Array | null; // 추가: 마지막으로 받은 오디오 데이터
 }
 
 // 전역 Window 인터페이스 확장
@@ -43,6 +45,9 @@ declare global {
  * @returns {UseVoiceStreamingReturn} 음성 스트리밍 관련 상태 및 제어 함수
  */
 export function useVoiceStreaming(): UseVoiceStreamingReturn {
+  // 오디오 컨텍스트 가져오기
+  const { processingAudio } = useAudio();
+
   // 상태 변수들 (타입 명시)
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const [statusMessage, setStatusMessage] = useState<string>('버튼을 누르고 말씀하세요.');
@@ -54,6 +59,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
   const [micStatusMessage, setMicStatusMessage] = useState<string>('');
   const [isPlayingAudio, setIsPlayingAudio] = useState<boolean>(false);
   const [processingTime, setProcessingTime] = useState<number | null>(null);
+  const [lastAudioData, setLastAudioData] = useState<Uint8Array | null>(null); // 추가: 마지막 오디오 데이터 상태
 
   // useRef (타입 명시, 초기값 null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -163,10 +169,22 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
     // webSocketRef, audioStreamRef는 onclose 또는 stopAudioStream에서 정리됨
   }, [stopAudioStream]);
 
-  // 오디오 재생 함수
+  // 오디오 재생 함수 수정 - 립싱크 컨텍스트로 오디오 데이터 전달
   const playAudioChunk = useCallback(async (audioData: Uint8Array): Promise<void> => {
     return new Promise((resolve, reject) => {
       try {
+        // 오디오 데이터 로깅 추가
+        console.log('오디오 데이터 전달 시도:', {
+          byteLength: audioData.byteLength,
+          isValidArray: audioData instanceof Uint8Array,
+          isEmpty: audioData.length === 0,
+          firstFewBytes: Array.from(audioData.slice(0, 10))
+        });
+        
+        // 오디오 데이터를 립싱크 컨텍스트로 전달
+        setLastAudioData(audioData);
+        processingAudio(audioData);
+        
         // 첫 번째 오디오 청크인 경우 처리 시간 계산
         if (isFirstAudioChunkRef.current && micDisabledTimeRef.current !== null) {
           const firstAudioTime = Date.now();
@@ -241,7 +259,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
         reject(error); // Promise 실패 알림
       }
     });
-  }, []);
+  }, [processingAudio]);
 
   // 그 다음에 processAudioQueue 함수 선언
   const processAudioQueue = useCallback(async (): Promise<void> => {
@@ -541,5 +559,6 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
     micStatusMessage,
     isPlayingAudio,
     processingTime,
+    lastAudioData, // 추가: 마지막 오디오 데이터
   };
 }
