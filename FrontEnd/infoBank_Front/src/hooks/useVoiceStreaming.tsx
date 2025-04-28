@@ -36,7 +36,6 @@ interface UseVoiceStreamingReturn {
   isMicDisabled: boolean;
   micStatusMessage: string;
   processingTime: number | null;
-  lastAudioData: Uint8Array | null;
 }
 
 // 전역 Window 인터페이스 확장
@@ -72,7 +71,6 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
   const [isMicDisabled, setIsMicDisabled] = useState<boolean>(false);
   const [micStatusMessage, setMicStatusMessage] = useState<string>('');
   const [processingTime, setProcessingTime] = useState<number | null>(null);
-  const [lastAudioData, setLastAudioData] = useState<Uint8Array | null>(null); // 추가: 마지막 오디오 데이터 상태
 
   // useRef (타입 명시, 초기값 null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -589,6 +587,5 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
     isMicDisabled,
     micStatusMessage,
     processingTime,
-    lastAudioData,
   };
 }
