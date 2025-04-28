@@ -214,6 +214,13 @@ const Live2DCanvas = ({ modelPath }) => {
         pixiAppRef.current.stage.addChild(model);
         modelRef.current = model; // Set model ref *after* adding to stage
 
+        // --- Idle 모션 그룹 비활성화 ---
+        if (model.internalModel?.motionManager?.groups?.idle) {
+          console.log("[Debug] Disabling Idle motion group.");
+          model.internalModel.motionManager.groups.idle = undefined; // 또는 null 이나 빈 배열 [] 로 설정
+        }
+        // -----------------------------
+
         // 모델 로드 성공 후 립싱크 파라미터 설정 (Haru 모델 기준)
         // Haru.model3.json의 Groups -> LipSync -> Ids 확인
         const haruLipSyncParams = ['ParamMouthOpenY']; 
