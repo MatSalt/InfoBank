@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as PIXI from 'pixi.js';
 import { Live2DModel } from 'pixi-live2d-display';
-import { LiveAudioProcessor } from '../../utils/LiveAudioProcessor';
+// import { LiveAudioProcessor } from '../../utils/LiveAudioProcessor'; // 제거
 import { useAudio } from '../../contexts/AudioContext';
 
 // PIXI를 전역 window에 노출시켜 Live2D 모델이 자동 업데이트되도록 함
@@ -12,329 +12,273 @@ const Live2DCanvas = ({ modelPath }) => {
   const pixiAppRef = useRef(null);
   const modelRef = useRef(null);
   const animationFrameRef = useRef(null);
-  const audioProcessorRef = useRef(null);
-  const [lipSyncEnabled, setLipSyncEnabled] = useState(false);
-  const currentLipSyncValueRef = useRef(0);
-  const [lipSyncParams, setLipSyncParams] = useState(null);
-  const { audioData, isAudioPlaying } = useAudio();
+  // const audioProcessorRef = useRef(null); // 제거
+  const dataArrayRef = useRef(null); // AnalyserNode 데이터 배열 ref
+  const currentLipSyncValueRef = useRef(0); // 스무딩된 값 저장용 ref
+  // const [lipSyncEnabled, setLipSyncEnabled] = useState(false); // isAudioPlaying으로 대체
+  // const [lipSyncParams, setLipSyncParams] = useState(null); // 모델 로드 시 직접 설정
 
-  // 오디오 프로세서 초기화
+  // isAudioPlaying과 analyserNode를 컨텍스트에서 가져옴
+  const { isAudioPlaying, analyserNode } = useAudio();
+
+  // 오디오 프로세서 초기화 제거
+  // useEffect(() => { ... }, []);
+
+  // AnalyserNode 준비 시 데이터 배열 생성
   useEffect(() => {
-    audioProcessorRef.current = new LiveAudioProcessor();
-    
-    return () => {
-      if (audioProcessorRef.current) {
-        audioProcessorRef.current.dispose();
-      }
-    };
-  }, []);
-
-  // 오디오 데이터 및 재생 상태 변경 처리
-  useEffect(() => {
-    console.log('[Debug] 오디오 상태 변경 감지:', { isAudioPlaying, hasAudioData: !!audioData });
-
-    if (isAudioPlaying && audioData && audioProcessorRef.current) {
-      try {
-        // processAudioData 호출하여 값 계산
-        const value = audioProcessorRef.current.processAudioData(audioData);
-        // 상태 대신 ref에 직접 값 할당
-        currentLipSyncValueRef.current = value;
-        console.log('오디오 데이터 처리됨, 립싱크 값 (ref): ', currentLipSyncValueRef.current.toFixed(4));
-
-        // lipSyncEnabled 상태는 유지 (언제 립싱크를 적용할지 결정하기 위함)
-        if (!lipSyncEnabled) {
-           setLipSyncEnabled(true);
-        }
-
-      } catch (error) {
-        console.error('오디오 데이터 처리 오류:', error);
-        setLipSyncEnabled(false);
-        currentLipSyncValueRef.current = 0; // 오류 시 0으로 초기화
-      }
-    } else {
-      // 오디오 재생 중이 아니거나 데이터가 없으면 비활성화 및 값 초기화
-      if (lipSyncEnabled) { // 상태 변경 최소화를 위해 조건 추가
-        console.log('[LipSync] 오디오 중지됨, 립싱크 비활성화');
-        setLipSyncEnabled(false);
-        // ref 값 초기화
-        currentLipSyncValueRef.current = 0;
-
-        // 오디오 중지 시 즉시 파라미터 0으로 설정 (이전 코드 유지)
-        if (modelRef.current) {
-          try {
-            console.log('[Debug][useEffect] Force setting ParamMouthOpenY = 0');
-            modelRef.current.internalModel.coreModel.setParameterValueById('ParamMouthOpenY', 0);
-          } catch (error) {
-            console.error('Error setting mouth parameter to 0 in useEffect:', error);
-          }
-        }
-      }
+    if (analyserNode && !dataArrayRef.current) {
+      // AnalyserNode의 frequencyBinCount 크기에 맞춰 Uint8Array 생성
+      // frequencyBinCount는 fftSize의 절반
+      dataArrayRef.current = new Uint8Array(analyserNode.frequencyBinCount);
+      console.log('[Live2DCanvas] AnalyserNode data array initialized with size:', analyserNode.frequencyBinCount);
     }
-    // isAudioPlaying, lipSyncEnabled는 의존성 배열에 유지
-    // audioData는 너무 자주 변경될 수 있으므로, 변경 시마다 ref를 업데이트하되
-    // useEffect 자체를 너무 자주 트리거하지 않도록 audioData 자체는 배열에서 제거하거나
-    // 다른 방식으로 처리하는 것을 고려해볼 수 있음 (지금은 유지)
-  }, [audioData, isAudioPlaying, lipSyncEnabled]);
+  }, [analyserNode]); // analyserNode가 변경될 때 실행
 
-  // 립싱크 파라미터 업데이트 함수
+  // 오디오 데이터 및 재생 상태 변경 처리 useEffect 제거 (updateLipSync에서 직접 처리)
+  // useEffect(() => { ... }, [audioData, isAudioPlaying, lipSyncEnabled]);
+
+  // 립싱크 파라미터 업데이트 함수 수정
   const updateLipSync = useCallback(() => {
-    if (!modelRef.current) return; // 모델 없으면 아무것도 안함
+    // 필요한 요소들이 준비되지 않았으면 중단
+    if (!modelRef.current || !modelRef.current.internalModel?.coreModel || !analyserNode || !dataArrayRef.current) {
+        // 입 모양 초기화 (모델 로드 전에 호출될 수 있으므로 안전하게 처리)
+        if (modelRef.current?.internalModel?.coreModel) {
+             try {
+                 modelRef.current.internalModel.coreModel.setParameterValueById('ParamMouthOpenY', 0);
+             } catch {}
+        }
+        return;
+    }
 
-    let valueToSet = 0; // 기본값 0 (입 닫힘)
+    let valueToSet = 0; // 기본값 (입 닫힘)
 
-    // lipSyncEnabled 상태를 확인하여 값 결정
-    if (lipSyncEnabled) {
-      // 상태 대신 ref에서 현재 값 가져오기
+    // 오디오가 재생 중일 때만 분석 수행
+    if (isAudioPlaying) {
+      // 시간 영역 데이터 가져오기 (파형 분석)
+      analyserNode.getByteTimeDomainData(dataArrayRef.current);
+
+      // RMS(Root Mean Square) 계산으로 볼륨 측정 (0 ~ 1 범위로 정규화된 값)
+      let sumSquares = 0.0;
+      for (const amplitude of dataArrayRef.current) {
+        // 데이터는 Uint8 (0~255), 128을 0점으로 간주하여 -1 ~ +1 범위로 정규화
+        const normalizedAmplitude = (amplitude / 128.0) - 1.0;
+        sumSquares += normalizedAmplitude * normalizedAmplitude;
+      }
+      const rms = Math.sqrt(sumSquares / dataArrayRef.current.length);
+
+      // RMS 값(일반적으로 0 ~ 0.7 범위)을 립싱크 값(0 ~ 1)으로 매핑
+      // 증폭 계수(예: 1.5 또는 2.0)를 조절하여 입 움직임 크기 조절
+      const amplification = 1.8; // 이 값을 조절해보세요
+      valueToSet = Math.min(1.0, rms * amplification); // 1.0을 넘지 않도록 제한
+
+      // 스무딩 적용 (선택 사항, 값을 부드럽게 변화시킴)
+      const smoothingFactor = 0.7; // 0(반응 빠름) ~ 1(반응 느림) 사이 값
+      currentLipSyncValueRef.current = currentLipSyncValueRef.current * smoothingFactor + valueToSet * (1 - smoothingFactor);
       valueToSet = currentLipSyncValueRef.current;
 
-      // 값 범위 제한 (0.0 ~ 1.0)
-      valueToSet = Math.max(0.0, Math.min(1.0, valueToSet));
+      // 디버깅 로그 (필요시 활성화)
+      // console.log(`[Live2DCanvas][updateLipSync] RMS: ${rms.toFixed(4)}, Smoothed Value: ${valueToSet.toFixed(4)}`);
+
+    } else {
+       // 오디오 재생 중이 아닐 때는 스무딩 값도 0으로 초기화
+       currentLipSyncValueRef.current = 0;
+       valueToSet = 0;
     }
-    // else (lipSyncEnabled가 false면) valueToSet은 0 유지
 
     try {
-      // 항상 ParamMouthOpenY 값을 설정
-      // 최종 적용 직전에 값 로깅
-      console.log(`[Live2DCanvas][updateLipSync] Setting ParamMouthOpenY = ${valueToSet.toFixed(4)} (Enabled: ${lipSyncEnabled})`);
+      // 계산된 값으로 입 모양 파라미터 설정
       modelRef.current.internalModel.coreModel.setParameterValueById('ParamMouthOpenY', valueToSet);
-
-      // ParamMouthForm 부분은 Haru 모델에서 사용 안 함 (그대로 둠)
-      // ...
-
     } catch (error) {
-      console.error('립싱크 파라미터 업데이트 오류:', error);
+      // 파라미터 설정 오류는 자주 발생할 수 있으므로, 에러 레벨을 낮추거나 필터링 고려
+      // console.error('립싱크 파라미터 업데이트 오류:', error);
     }
-  }, [lipSyncEnabled, lipSyncParams]); // lipSyncValue 상태 의존성 제거, lipSyncEnabled, lipSyncParams 유지
+  }, [isAudioPlaying, analyserNode]); // isAudioPlaying, analyserNode 변경 시 함수 재생성
 
-  // 애니메이션 프레임 업데이트 함수 (useCallback 유지)
+  // 애니메이션 프레임 업데이트 함수 (변경 없음)
   const animate = useCallback(() => {
-    // console.log("[Debug] animate called"); // Optional: Add log here too
     updateLipSync();
-    // Schedule next frame, but store the ID in the ref
     animationFrameRef.current = requestAnimationFrame(animate);
-  }, [updateLipSync]); // animate depends on updateLipSync
+  }, [updateLipSync]);
 
-  // useEffect for Model Loading (NO animation start here)
+  // 모델 로딩 useEffect (파라미터 설정 부분 외 변경 없음)
   useEffect(() => {
-    // ---- Mount Check ----
     let mounted = true;
-    // ---------------------
+    let isModelLoaded = false;
 
-    let isModelLoaded = false; // Keep this for intra-render check
-
-    // PIXI 앱 초기화
     const app = new PIXI.Application({
       width: containerRef.current.clientWidth,
       height: containerRef.current.clientHeight,
       backgroundColor: 0x00000000, // 투명 배경
       autoStart: true,
-      antialias: true // 부드러운 렌더링을 위해 추가
+      antialias: true
     });
-    
-    containerRef.current.appendChild(app.view);
-    app.view.style.width = '100%';
-    app.view.style.height = '100%';
-    pixiAppRef.current = app;
 
-    // Live2D 모델 로드
-    const loadModel = async (currentApp) => { // Pass app instance
+    // containerRef가 유효한지 확인 후 view 추가
+    if (containerRef.current) {
+        containerRef.current.appendChild(app.view);
+        app.view.style.width = '100%';
+        app.view.style.height = '100%';
+        pixiAppRef.current = app;
+    } else {
+        console.error("Container ref is not available to append PIXI view.");
+        app.destroy(true, { removeView: true }); // 앱 정리
+        return; // 조기 종료
+    }
+
+    const loadModel = async (currentApp) => {
       try {
-        // Check if already loaded in this cycle or previous ref still exists
-        if (isModelLoaded || modelRef.current) {
-          console.log('모델 로드 시도 중지: 이미 로드됨');
-          return;
-        }
+        if (isModelLoaded || modelRef.current) return;
+        if (!mounted) return;
 
-        // Check if component unmounted before starting
-        if (!mounted) {
-          console.log('모델 로드 시도 중지: 컴포넌트 언마운트됨');
-          return;
-        }
-        
         console.log('모델 로드 시작:', modelPath);
-        isModelLoaded = true; // Mark as loading *within this render cycle*
-        
-        // Check if app exists before loading
-        if (!currentApp || !currentApp.renderer) { // Use passed app instance
+        isModelLoaded = true;
+
+        if (!currentApp || !currentApp.renderer) {
           console.error('PIXI 앱이 초기화되지 않았거나 제거됨 (로드 전)');
           isModelLoaded = false;
           return;
         }
-        
-        // --- Async Operation ---
-        const model = await Live2DModel.from(modelPath);
-        // -----------------------
 
-        // ---- Post-Async Checks ----
+        const model = await Live2DModel.from(modelPath);
+
         if (!mounted) {
           console.log('모델 로드 중단: 컴포넌트 언마운트됨 (로드 후)');
-          if (model) model.destroy(); // Clean up loaded model if unmounted
+          if (model) model.destroy();
           isModelLoaded = false;
           return;
         }
-        if (!pixiAppRef.current || !pixiAppRef.current.renderer) { // Re-check app ref after await
+        if (!pixiAppRef.current || !pixiAppRef.current.renderer) {
             console.error('PIXI 앱이 제거됨 (로드 후)');
             if (model) model.destroy();
             isModelLoaded = false;
             return;
         }
-        // ---------------------------
 
         if (!model) {
           console.error('모델 로드 실패: 모델이 null입니다.');
           isModelLoaded = false;
           return;
         }
-        
-        // 4. 모델의 width와 height가 유효한지 확인
+
         if (typeof model.width !== 'number' || typeof model.height !== 'number') {
-          console.log('모델 크기 정보가 아직 준비되지 않음, 기본값 설정');
-          // 기본 크기 설정
           model.width = model.width || 500;
           model.height = model.height || 500;
         }
-        
         console.log('모델 크기:', model.width, model.height);
-        
-        // 모델의 얼굴 부분이 잘 보이도록 위치 및 크기 조정
+
         const scale = Math.min(
           pixiAppRef.current.renderer.width / (model.width * 1.2),
           pixiAppRef.current.renderer.height / (model.height * 1.2)
         );
-        
-        // 모델 크기 설정
+
         model.scale.set(scale);
         model.anchor.set(0.5, 0.5);
-        
-        // Y축 위치를 약간 위로 조정하여 얼굴이 중앙에 오도록 함
         model.x = pixiAppRef.current.renderer.width / 2;
         model.y = (pixiAppRef.current.renderer.height / 2) - (model.height * scale * 0.1);
-        
-        // 인터랙션 활성화
         model.interactive = true;
 
-        // 자동 모션 활성화 (idle 모션) - 주석 처리하여 비활성화
-        // if (model.internalModel?.motionManager) {
-        //   model.internalModel.motionManager.startRandomMotion('Idle');
-        // }
-
-        // Add to stage *only if app still valid*
-        pixiAppRef.current.stage.addChild(model);
-        modelRef.current = model; // Set model ref *after* adding to stage
-
-        // --- Idle 모션 그룹 비활성화 ---
+        // --- Idle 모션 그룹 비활성화 유지 ---
         if (model.internalModel?.motionManager?.groups?.idle) {
           console.log("[Debug] Disabling Idle motion group.");
-          model.internalModel.motionManager.groups.idle = undefined; // 또는 null 이나 빈 배열 [] 로 설정
+          model.internalModel.motionManager.groups.idle = undefined;
         }
-        // -----------------------------
+        // ---------------------------------
 
-        // 모델 로드 성공 후 립싱크 파라미터 설정 (Haru 모델 기준)
-        // Haru.model3.json의 Groups -> LipSync -> Ids 확인
-        const haruLipSyncParams = ['ParamMouthOpenY']; 
-        console.log('[LipSync] 사용할 파라미터 설정:', haruLipSyncParams);
-        setLipSyncParams(haruLipSyncParams); 
+        // 스테이지에 추가 전에 앱 유효성 재확인
+        if (pixiAppRef.current && pixiAppRef.current.stage) {
+            pixiAppRef.current.stage.addChild(model);
+            modelRef.current = model;
+        } else {
+            console.error("Cannot add model to stage, Pixi App or stage not available.");
+            model.destroy(); // 생성된 모델 정리
+            isModelLoaded = false;
+            return;
+        }
 
-        // --- REMOVE animation start from here ---
-        // animationFrameRef.current = requestAnimationFrame(animate); // 이 줄 제거
-        // ----------------------------------------
+        // 모델 로드 성공 후 립싱크 파라미터 직접 설정
+        const haruLipSyncParams = ['ParamMouthOpenY'];
+        console.log('[LipSync] 사용할 파라미터:', haruLipSyncParams);
 
       } catch (e) {
         console.error('Live2D 모델 로드 중 오류 발생:', e);
-        isModelLoaded = false; // Reset flag on error
+        isModelLoaded = false;
       }
     };
 
-    // Initial load call
-    loadModel(pixiAppRef.current); // Pass the current app instance
+    loadModel(pixiAppRef.current);
 
-    // 화면 크기 변경 감지 및 대응
     const handleResize = () => {
-        // Use pixiAppRef.current and modelRef.current, check they exist
-        if (!pixiAppRef.current || !pixiAppRef.current.renderer || !modelRef.current) return; 
-        
+        if (!pixiAppRef.current || !pixiAppRef.current.renderer || !modelRef.current) return;
+        // containerRef.current가 유효한지 확인
+        if (!containerRef.current) return;
+
         pixiAppRef.current.renderer.resize(containerRef.current.clientWidth, containerRef.current.clientHeight);
 
-        const scale = Math.min(
-          pixiAppRef.current.renderer.width / (modelRef.current.width * 1.2),
-          pixiAppRef.current.renderer.height / (modelRef.current.height * 1.2)
-        );
-        
-        modelRef.current.scale.set(scale);
-        modelRef.current.x = pixiAppRef.current.renderer.width / 2;
-        modelRef.current.y = (pixiAppRef.current.renderer.height / 2) - (modelRef.current.height * scale * 0.1);
+        // 모델 크기 및 위치 재계산 (모델 로드 완료 후)
+        if (modelRef.current.width && modelRef.current.height) {
+            const scale = Math.min(
+              pixiAppRef.current.renderer.width / (modelRef.current.width * 1.2),
+              pixiAppRef.current.renderer.height / (modelRef.current.height * 1.2)
+            );
+            modelRef.current.scale.set(scale);
+            modelRef.current.x = pixiAppRef.current.renderer.width / 2;
+            modelRef.current.y = (pixiAppRef.current.renderer.height / 2) - (modelRef.current.height * scale * 0.1);
+        }
     };
 
     window.addEventListener('resize', handleResize);
 
-    // --- Cleanup Function ---
     return () => {
-      mounted = false; // Mark as unmounted
+      mounted = false;
       window.removeEventListener('resize', handleResize);
-      
-      // --- REMOVE cancelAnimationFrame from here ---
-      // 애니메이션 루프 관리는 다른 useEffect에서 하므로 여기서 취소하지 않음
-      // -----------------------------------------------
 
-      // Destroy modelRef first if it exists
       if (modelRef.current) {
-        // Check if it's actually on stage before removing
-        if (pixiAppRef.current && pixiAppRef.current.stage && pixiAppRef.current.stage.children.includes(modelRef.current)) {
+        // 모델 제거 전 스테이지 확인
+        if (pixiAppRef.current?.stage?.children.includes(modelRef.current)) {
             pixiAppRef.current.stage.removeChild(modelRef.current);
         }
-        modelRef.current.destroy();
-        modelRef.current = null; // Clear ref
+        modelRef.current.destroy({ children: true }); // 내부 리소스도 함께 파괴
+        modelRef.current = null;
       }
-      
-      // Then destroy the app
+
       if (pixiAppRef.current) {
-        // Check containerRef exists before removing view
-        if (containerRef.current && containerRef.current.contains(pixiAppRef.current.view)) {
+        // 뷰 제거 전 컨테이너 확인
+        if (containerRef.current && pixiAppRef.current.view && containerRef.current.contains(pixiAppRef.current.view)) {
             containerRef.current.removeChild(pixiAppRef.current.view);
         }
-        pixiAppRef.current.destroy(true, { removeView: true });
-        pixiAppRef.current = null; // Clear ref
+        pixiAppRef.current.destroy(true, { children: true, texture: true, baseTexture: true }); // 모든 리소스 파괴
+        pixiAppRef.current = null;
       }
-      
-      // isModelLoaded doesn't need resetting here as it's local to useEffect
     };
-  }, [modelPath]); // Only depends on modelPath
+  }, [modelPath]);
 
-  // NEW useEffect for managing animation loop
+  // 애니메이션 루프 관리 useEffect (변경 없음)
   useEffect(() => {
-    // Start animation only if model is loaded AND the animate function is ready
     if (modelRef.current && pixiAppRef.current) {
         console.log("[Debug] Starting animation loop.");
-        // Cancel any previous loop just in case (e.g., if animate function updates rapidly)
         if (animationFrameRef.current) {
             cancelAnimationFrame(animationFrameRef.current);
         }
-        // Start the loop with the current (latest) animate function
         animationFrameRef.current = requestAnimationFrame(animate);
-    } else {
-        // Optional: Log if animation doesn't start because model isn't ready
-        // console.log("[Debug] Animation loop not started: Model or App not ready.");
     }
-
-    // Cleanup function for THIS useEffect: Stop the loop when component unmounts OR when animate function changes
     return () => {
         console.log("[Debug] Stopping animation loop.");
         if (animationFrameRef.current) {
             cancelAnimationFrame(animationFrameRef.current);
-            animationFrameRef.current = null; // Clear ref
+            animationFrameRef.current = null;
         }
     };
-  }, [animate]); // Key dependency: Run this effect when the 'animate' function reference changes
+  }, [animate]);
 
   return (
-    <div 
-      ref={containerRef} 
-      style={{ 
-        width: '100%', 
+    <div
+      ref={containerRef}
+      style={{
+        width: '100%',
         height: '100%',
         overflow: 'hidden',
         position: 'relative'
-      }} 
+      }}
     />
   );
 };

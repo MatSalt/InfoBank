@@ -1,9 +1,16 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { WS_URL } from '../constants/env';
-import { useAudio } from '../contexts/AudioContext'; // 오디오 컨텍스트 추가
+// import axios from 'axios'; // 사용하지 않으므로 제거
+import { useAudio } from '../contexts/AudioContext';
+
+// 사용하지 않으므로 제거
+// interface AudioChunk {
+//   type: 'audio';
+//   data: string; // Base64 encoded audio data
+// }
 
 // WebSocket 연결 주소를 환경 변수에서 가져옴
-const WEBSOCKET_URL = WS_URL;
+// .env 파일에 VITE_BACKEND_WS_URL=ws://localhost:8000/ws/audio 형태로 정의해야 합니다.
+const WEBSOCKET_URL = import.meta.env.VITE_BACKEND_WS_URL;
 
 // WebSocket 서버로부터 받을 것으로 예상되는 데이터 구조 인터페이스
 interface WebSocketResponse {
@@ -44,8 +51,16 @@ declare global {
  * @returns {UseVoiceStreamingReturn} 음성 스트리밍 관련 상태 및 제어 함수
  */
 export function useVoiceStreaming(): UseVoiceStreamingReturn {
-  // 오디오 컨텍스트 가져오기 (clearAudio 포함)
-  const { processingAudio, clearAudio } = useAudio();
+  // isInitialized 가져오기
+  const { processingAudio, clearAudio, analyserNode, audioContext, isInitialized } = useAudio();
+
+  // 기존 로그 제거 또는 수정
+  console.log('[useVoiceStreaming] Context status:', {
+    isInitialized,
+    isAudioPlaying: useAudio().isAudioPlaying, // isAudioPlaying은 state이므로 매번 최신 값 확인
+    analyserNode: !!analyserNode,
+    audioContext: !!audioContext
+  });
 
   // 상태 변수들 (타입 명시)
   const [isRecording, setIsRecording] = useState<boolean>(false);
@@ -63,9 +78,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const webSocketRef = useRef<WebSocket | null>(null);
   const audioStreamRef = useRef<MediaStream | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
   const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
-  const playbackAudioContextRef = useRef<AudioContext | null>(null);
   const audioQueueRef = useRef<Uint8Array[]>([]);
   const isPlayingRef = useRef<boolean>(false);
 
@@ -119,17 +132,6 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
       audioProcessorRef.current = null;
     }
     
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
-    }
-    
-    // 재생 오디오 컨텍스트 정리
-    if (playbackAudioContextRef.current) {
-      playbackAudioContextRef.current.close();
-      playbackAudioContextRef.current = null;
-    }
-    
     // 오디오 큐 초기화
     audioQueueRef.current = [];
     isPlayingRef.current = false;
@@ -171,8 +173,21 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
     // webSocketRef, audioStreamRef는 onclose 또는 stopAudioStream에서 정리됨
   }, [stopAudioStream]);
 
-  // 오디오 재생 함수 수정 - 립싱크 컨텍스트로 오디오 데이터 전달
+  // 오디오 재생 함수 수정
   const playAudioChunk = useCallback(async (audioData: Uint8Array): Promise<void> => {
+    // *** 초기화 및 컨텍스트 유효성 검사 강화 ***
+    if (!isInitialized || !audioContext) {
+      console.error(`AudioContext not ready. Initialized: ${isInitialized}, Context available: ${!!audioContext}`);
+      return Promise.reject('AudioContext is not ready or available');
+    }
+    // ***************************************
+
+    // AudioContext 상태 확인 및 재개 (필요한 경우)
+    if (audioContext.state === 'suspended') {
+      await audioContext.resume();
+      console.log("AudioContext resumed.");
+    }
+
     return new Promise((resolve, reject) => {
       try {
         // 오디오 데이터 로깅 추가
@@ -182,11 +197,9 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
           isEmpty: audioData.length === 0,
           firstFewBytes: Array.from(audioData.slice(0, 10))
         });
-        
-        // 오디오 데이터를 립싱크 컨텍스트로 전달
-        setLastAudioData(audioData);
-        processingAudio(audioData);
-        
+
+        processingAudio(); // 오디오 처리 시작 알림
+
         // 첫 번째 오디오 청크인 경우 처리 시간 계산
         if (isFirstAudioChunkRef.current && micDisabledTimeRef.current !== null) {
           const firstAudioTime = Date.now();
@@ -196,72 +209,71 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
           isFirstAudioChunkRef.current = false;
         }
 
-        // --- 백엔드 TTS와 일치하는 샘플링 레이트 ---
-        const SAMPLE_RATE = 24000; // 백엔드에서 설정한 값 (예: 24000)
+        // --- decodeAudioData 대신 수동으로 AudioBuffer 생성 ---
+        const numberOfSamples = audioData.byteLength / 2; // 16-bit PCM = 2 bytes per sample
+        const sampleRate = audioContext.sampleRate; // Provider에서 설정한 24000Hz 사용
 
-        // 재생용 AudioContext가 없거나 닫혔으면 새로 생성 (샘플링 레이트 명시)
-        if (!playbackAudioContextRef.current || playbackAudioContextRef.current.state === 'closed') {
-          if (playbackAudioContextRef.current) {
-            playbackAudioContextRef.current.close(); // 이전 컨텍스트 정리
-          }
-          playbackAudioContextRef.current = new (window.AudioContext || window.webkitAudioContext)({
-            sampleRate: SAMPLE_RATE // 샘플링 레이트 지정
-          });
-          console.log(`Playback AudioContext 생성/재생성됨 (Sample Rate: ${SAMPLE_RATE}Hz)`);
-        } else if (playbackAudioContextRef.current.sampleRate !== SAMPLE_RATE) {
-            // 만약 기존 컨텍스트의 샘플링 레이트가 다르다면 (이론상 발생하기 어려움)
-            console.warn(`기존 AudioContext 샘플링 레이트(${playbackAudioContextRef.current.sampleRate})와 요청된 레이트(${SAMPLE_RATE})가 다릅니다. 컨텍스트를 재생성합니다.`);
-            playbackAudioContextRef.current.close();
-            playbackAudioContextRef.current = new (window.AudioContext || window.webkitAudioContext)({
-               sampleRate: SAMPLE_RATE
-            });
+        if (numberOfSamples <= 0) {
+             console.warn("Received empty audio data.");
+             resolve(); // 빈 데이터는 그냥 완료 처리
+             return;
         }
 
-
-        const audioContext = playbackAudioContextRef.current;
-
-        // 오디오 데이터를 AudioBuffer로 변환
-        const numberOfSamples = audioData.length / 2; // LINEAR16은 샘플당 2바이트
         const audioBuffer = audioContext.createBuffer(
-          1, // 모노 채널
+          1, // numberOfChannels - 모노
           numberOfSamples,
-          SAMPLE_RATE // 백엔드와 일치하는 샘플링 레이트 사용
+          sampleRate
         );
-        const channelData = audioBuffer.getChannelData(0); // 채널 데이터 (Float32Array)
 
-        // DataView를 사용하여 바이트 순서(little-endian)를 명시적으로 처리
+        const channelData = audioBuffer.getChannelData(0); // Float32Array
         const dataView = new DataView(audioData.buffer);
+
         for (let i = 0; i < numberOfSamples; i++) {
-          // offset: i * 2 (2바이트씩 읽음), littleEndian: true
+          // LINEAR16 (signed 16-bit integer, little-endian)
           const int16Value = dataView.getInt16(i * 2, true);
-          // Float32Array (-1.0 ~ 1.0)로 정규화
+          // Normalize to Float32 range (-1.0 to 1.0)
           channelData[i] = int16Value / 32768.0;
         }
+        // ---------------------------------------------------
 
-        // 오디오 소스 생성 및 재생
+        // 수동으로 생성된 AudioBuffer를 사용하여 소스 노드 생성
         const source = audioContext.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(audioContext.destination);
+        source.buffer = audioBuffer; // 직접 생성한 버퍼 할당
 
-        // 재생 시작 로깅
-        console.log(`오디오 청크 재생 시작 (${audioData.length} bytes)`);
-        
-        // 재생 완료 시 Promise를 resolve하고 소스 정리
+        // AnalyserNode 또는 destination에 연결
+        if (analyserNode) {
+            source.connect(analyserNode);
+            // Provider에서 AnalyserNode를 destination에 미리 연결했으므로,
+            // 여기서는 source -> analyser 연결만 하면 됨.
+            console.log('Audio source connected to AnalyserNode.');
+        } else {
+            // AnalyserNode 없으면 바로 destination 연결
+            source.connect(audioContext.destination);
+            console.warn('AnalyserNode not available, connecting source directly to destination.');
+        }
+
+        console.log(`오디오 청크 재생 시작 (Manually created buffer, ${numberOfSamples} samples)`);
+
         source.onended = () => {
-          console.log(`오디오 청크 재생 완료 (${audioData.length} bytes)`);
-          source.disconnect();
-          resolve(); // Promise 완료 알림
+          console.log(`오디오 청크 재생 완료 (Manually created buffer)`);
+          try {
+              source.disconnect(); // 연결 해제 시도
+          } catch (disconnectError) {
+              // 이미 연결 해제된 경우 오류 발생 가능성 있음
+              console.warn("Error disconnecting source node (might already be disconnected):", disconnectError);
+          }
+          resolve();
         };
 
         source.start(0); // 즉시 재생
 
       } catch (error) {
         console.error('오디오 재생 함수 내 오류 발생:', error);
-        isPlayingRef.current = false; // 재생 실패 시 상태 업데이트
-        reject(error); // Promise 실패 알림
+        reject(error);
       }
     });
-  }, [processingAudio]);
+  // isInitialized 의존성 추가
+  }, [processingAudio, audioContext, analyserNode, isInitialized]);
 
   // 그 다음에 processAudioQueue 함수 선언 - clearAudio 호출 추가
   const processAudioQueue = useCallback(async (): Promise<void> => {
@@ -307,6 +319,15 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
   // WebSocket 연결 설정 함수
   const setupWebSocket = useCallback((): Promise<WebSocket> => {
     return new Promise((resolve, reject) => {
+      if (!WEBSOCKET_URL) {
+          const errMsg = "WebSocket URL이 정의되지 않았습니다. .env 파일에 VITE_BACKEND_WS_URL을 설정해주세요.";
+          console.error(errMsg);
+          setErrorMessage(errMsg);
+          setIsConnecting(false); // 연결 시도 중 상태 해제
+          reject(new Error(errMsg));
+          return;
+      }
+
       if (webSocketRef.current && webSocketRef.current.readyState !== WebSocket.CLOSED) {
         webSocketRef.current.close();
         console.log("Previous WebSocket connection closed.");
@@ -434,7 +455,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
         stopAudioStream(); // WebSocket 종료 시 스트림도 확실히 정리
       };
     });
-  }, [stopAudioStream, processAudioQueue]); // processAudioQueue 의존성 추가
+  }, [stopAudioStream, processAudioQueue, stopRecording, enableMicrophone]); // enableMicrophone, stopRecording 의존성 추가
 
   // MediaRecorder 설정 및 스트리밍 시작 함수
   const setupAndStartStreaming = useCallback(async (): Promise<boolean> => {
@@ -443,16 +464,21 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
       return false;
     }
 
+    // *** 녹음용 AudioContext는 별도로 관리 ***
+    let recordingAudioContext: AudioContext | null = null;
+    let recordingProcessor: ScriptProcessorNode | null = null;
+    // **************************************
+
     try {
       // 오디오 스트림 가져오기
-      const stream: MediaStream = await navigator.mediaDevices.getUserMedia({ 
+      const stream: MediaStream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          channelCount: 1, // 모노 채널
-          sampleRate: 16000, // 16kHz 샘플링 레이트
+          channelCount: 1,
+          sampleRate: 16000,
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true
-        } 
+        }
       });
       audioStreamRef.current = stream;
 
@@ -463,41 +489,35 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
 
       if (webSocketRef.current?.readyState !== WebSocket.OPEN) {
         console.error("WebSocket 연결 실패하여 녹음을 시작할 수 없습니다.");
-        stopAudioStream();
+        stopAudioStream(); // 스트림 정리
         return false;
       }
 
-      // Web Audio API를 사용하여 LINEAR16 PCM 데이터 생성
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)({
-        sampleRate: 16000 // 16kHz 샘플링 레이트
+      // Web Audio API를 사용하여 LINEAR16 PCM 데이터 생성 (녹음용 컨텍스트 사용)
+      recordingAudioContext = new (window.AudioContext || window.webkitAudioContext)({
+        sampleRate: 16000 // 녹음은 16kHz
       });
-      audioContextRef.current = audioContext;
+      // audioContextRef.current = recordingAudioContext; // 전역 audioContextRef는 재생용으로 유지
 
-      const source = audioContext.createMediaStreamSource(stream);
-      const processor = audioContext.createScriptProcessor(4096, 1, 1);
-      audioProcessorRef.current = processor;
+      const source = recordingAudioContext.createMediaStreamSource(stream);
+      recordingProcessor = recordingAudioContext.createScriptProcessor(4096, 1, 1);
+      audioProcessorRef.current = recordingProcessor; // ScriptProcessor 참조 저장 (정리용)
 
       // 오디오 처리 및 전송
-      processor.onaudioprocess = (e) => {
+      recordingProcessor.onaudioprocess = (e) => {
         if (webSocketRef.current?.readyState === WebSocket.OPEN) {
-          // 입력 버퍼에서 데이터 가져오기
           const inputData = e.inputBuffer.getChannelData(0);
-          
-          // Float32Array를 Int16Array로 변환 (LINEAR16 형식)
           const pcmData = new Int16Array(inputData.length);
           for (let i = 0; i < inputData.length; i++) {
-            // Float32Array (-1.0 ~ 1.0)를 Int16Array (-32768 ~ 32767)로 변환
             pcmData[i] = Math.max(-32768, Math.min(32767, Math.floor(inputData[i] * 32767)));
           }
-          
-          // WebSocket으로 전송
           webSocketRef.current.send(pcmData.buffer);
         }
       };
 
-      // 오디오 노드 연결
-      source.connect(processor);
-      processor.connect(audioContext.destination);
+      // 오디오 노드 연결 (녹음용 컨텍스트 내에서)
+      source.connect(recordingProcessor);
+      recordingProcessor.connect(recordingAudioContext.destination); // 이 연결은 소리가 나지 않게 함
 
       console.log(`녹음 및 스트리밍 시작 (LINEAR16 PCM, 16kHz, 모노)`);
       return true;
@@ -514,9 +534,16 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
            setErrorMessage('알 수 없는 마이크 접근 오류 발생');
       }
       setIsConnecting(false);
+
+      // *** 오류 발생 시 녹음용 컨텍스트 정리 ***
+      if (recordingProcessor) recordingProcessor.disconnect();
+      if (recordingAudioContext) recordingAudioContext.close();
+      // **************************************
+
       return false;
     }
-  }, [isSupported, setupWebSocket, stopAudioStream, stopRecording]); // stopRecording 추가
+  // setupWebSocket, stopAudioStream 의존성 유지
+  }, [isSupported, setupWebSocket, stopAudioStream]);
 
   // 녹음 시작 함수
   const startRecording = useCallback(async (): Promise<void> => {
