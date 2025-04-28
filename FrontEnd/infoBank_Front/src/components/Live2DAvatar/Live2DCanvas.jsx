@@ -69,11 +69,11 @@ const Live2DCanvas = ({ modelPath }) => {
 
       // RMS 값(일반적으로 0 ~ 0.7 범위)을 립싱크 값(0 ~ 1)으로 매핑
       // 증폭 계수(예: 1.5 또는 2.0)를 조절하여 입 움직임 크기 조절
-      const amplification = 4.0; // 값 증가 (예: 1.8 -> 2.8)
+      const amplification = 5.0; // 값 증가 (예: 1.8 -> 2.8)
       valueToSet = Math.min(1.0, rms * amplification); // 1.0을 넘지 않도록 제한
 
       // 스무딩 적용 (선택 사항, 값을 부드럽게 변화시킴)
-      const smoothingFactor = 0.55; // 값 감소 (예: 0.7 -> 0.5)
+      const smoothingFactor = 0.65; // 값 감소 (예: 0.7 -> 0.5)
       currentLipSyncValueRef.current = currentLipSyncValueRef.current * smoothingFactor + valueToSet * (1 - smoothingFactor);
       valueToSet = currentLipSyncValueRef.current;
 
@@ -95,7 +95,7 @@ const Live2DCanvas = ({ modelPath }) => {
       // modelRef.current.internalModel.coreModel.setParameterValueById('ParamMouthForm', randomMouthFormValue);
 
       // ParamMouthForm 스무딩 적용
-      const mouthFormSmoothingFactor = 0.3; // 스무딩 강도 (0~1, 작을수록 느림)
+      const mouthFormSmoothingFactor = 0.25; // 스무딩 강도 (0~1, 작을수록 느림)
       let targetMouthFormValue;
       if (valueToSet >= 0.1) {
         // 목표 랜덤 값 생성 (-1 ~ 1)
