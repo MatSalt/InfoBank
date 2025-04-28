@@ -31,6 +31,10 @@ const Live2DCanvas = ({ modelPath }) => {
 
   // 오디오 데이터 및 재생 상태 변경 처리
   useEffect(() => {
+    // --- 추가할 로그 ---
+    console.log('[Debug] 오디오 상태 변경 감지:', { isAudioPlaying, hasAudioData: !!audioData }); 
+    // ------------------
+
     if (isAudioPlaying && audioData && audioProcessorRef.current && modelRef.current) {
       try {
         const value = audioProcessorRef.current.processAudioData(audioData);
@@ -53,22 +57,31 @@ const Live2DCanvas = ({ modelPath }) => {
 
   // 립싱크 파라미터 업데이트 함수
   const updateLipSync = useCallback(() => {
-    // 함수 진입 및 상태 값 로깅
-    // console.log(`[updateLipSync] Enabled: ${lipSyncEnabled}, Params: ${JSON.stringify(lipSyncParams)}, Value: ${lipSyncValue}`);
+    // 함수 진입 및 상태 값 로깅 (기존 로그 주석 해제 또는 추가)
+    // console.log(`[updateLipSync] Called. Enabled: ${lipSyncEnabled}, Value: ${lipSyncValue}`);
 
-    // 파라미터 상태 확인 (lipSyncParams가 배열이고 비어있지 않은지 확인)
     if (!modelRef.current || !lipSyncEnabled || !Array.isArray(lipSyncParams) || lipSyncParams.length === 0) {
-      return; // 조건 불충족 시 조용히 리턴
+      // --- 조건 불충족 시 로그 추가 ---
+      // console.log('[Debug][updateLipSync] Condition not met. Skipping update.');
+      // --------------------------
+      return;
     }
 
     try {
       const model = modelRef.current;
 
       // === Parameter Setting (Force coreModel) ===
-      // 입 열림 파라미터 (ParamMouthOpenY)
       if (lipSyncParams.includes('ParamMouthOpenY')) {
-        const valueToSet = lipSyncValue * 10; // 강도 유지
-        console.log(`[LipSync] Setting ParamMouthOpenY via coreModel to: ${valueToSet}`); // 주석 해제
+        const valueToSet = lipSyncValue; // 수정: 계산된 값을 그대로 사용 (0.0 ~ 1.0 범위 가정)
+
+        // --- 추가할 로그 ---
+        console.log(`[Debug][updateLipSync] Applying ParamMouthOpenY = ${valueToSet} (Raw Value: ${lipSyncValue})`);
+        // ------------------
+
+        // 값 범위 제한 (선택 사항, 안전 장치) - 필요시 주석 해제
+        // const clampedValue = Math.max(0.0, Math.min(1.0, valueToSet));
+        // model.internalModel.coreModel.setParameterValueById('ParamMouthOpenY', clampedValue);
+
         model.internalModel.coreModel.setParameterValueById('ParamMouthOpenY', valueToSet);
       }
 
@@ -85,17 +98,18 @@ const Live2DCanvas = ({ modelPath }) => {
     }
   }, [lipSyncEnabled, lipSyncParams, lipSyncValue]);
 
-  // 애니메이션 프레임 업데이트
+  // 애니메이션 프레임 업데이트 함수 (useCallback 유지)
   const animate = useCallback(() => {
+    // console.log("[Debug] animate called"); // Optional: Add log here too
     updateLipSync();
+    // Schedule next frame, but store the ID in the ref
     animationFrameRef.current = requestAnimationFrame(animate);
-  }, [updateLipSync]);
+  }, [updateLipSync]); // animate depends on updateLipSync
 
+  // useEffect for Model Loading (NO animation start here)
   useEffect(() => {
-    if (!containerRef.current) return;
-    
     // ---- Mount Check ----
-    let mounted = true; 
+    let mounted = true;
     // ---------------------
 
     let isModelLoaded = false; // Keep this for intra-render check
@@ -190,11 +204,11 @@ const Live2DCanvas = ({ modelPath }) => {
         
         // 인터랙션 활성화
         model.interactive = true;
-        
-        // 자동 모션 활성화 (idle 모션)
-        if (model.internalModel?.motionManager) {
-          model.internalModel.motionManager.startRandomMotion('Idle');
-        }
+
+        // 자동 모션 활성화 (idle 모션) - 주석 처리하여 비활성화
+        // if (model.internalModel?.motionManager) {
+        //   model.internalModel.motionManager.startRandomMotion('Idle');
+        // }
 
         // Add to stage *only if app still valid*
         pixiAppRef.current.stage.addChild(model);
@@ -206,8 +220,9 @@ const Live2DCanvas = ({ modelPath }) => {
         console.log('[LipSync] 사용할 파라미터 설정:', haruLipSyncParams);
         setLipSyncParams(haruLipSyncParams); 
 
-        // Start animation *only if app still valid*
-        animationFrameRef.current = requestAnimationFrame(animate);
+        // --- REMOVE animation start from here ---
+        // animationFrameRef.current = requestAnimationFrame(animate); // 이 줄 제거
+        // ----------------------------------------
 
       } catch (e) {
         console.error('Live2D 모델 로드 중 오류 발생:', e);
@@ -242,11 +257,10 @@ const Live2DCanvas = ({ modelPath }) => {
       mounted = false; // Mark as unmounted
       window.removeEventListener('resize', handleResize);
       
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-        animationFrameRef.current = null; // Clear ref
-      }
-      
+      // --- REMOVE cancelAnimationFrame from here ---
+      // 애니메이션 루프 관리는 다른 useEffect에서 하므로 여기서 취소하지 않음
+      // -----------------------------------------------
+
       // Destroy modelRef first if it exists
       if (modelRef.current) {
         // Check if it's actually on stage before removing
@@ -269,7 +283,33 @@ const Live2DCanvas = ({ modelPath }) => {
       
       // isModelLoaded doesn't need resetting here as it's local to useEffect
     };
-  }, [modelPath]); // animate가 없어야 함
+  }, [modelPath]); // Only depends on modelPath
+
+  // NEW useEffect for managing animation loop
+  useEffect(() => {
+    // Start animation only if model is loaded AND the animate function is ready
+    if (modelRef.current && pixiAppRef.current) {
+        console.log("[Debug] Starting animation loop.");
+        // Cancel any previous loop just in case (e.g., if animate function updates rapidly)
+        if (animationFrameRef.current) {
+            cancelAnimationFrame(animationFrameRef.current);
+        }
+        // Start the loop with the current (latest) animate function
+        animationFrameRef.current = requestAnimationFrame(animate);
+    } else {
+        // Optional: Log if animation doesn't start because model isn't ready
+        // console.log("[Debug] Animation loop not started: Model or App not ready.");
+    }
+
+    // Cleanup function for THIS useEffect: Stop the loop when component unmounts OR when animate function changes
+    return () => {
+        console.log("[Debug] Stopping animation loop.");
+        if (animationFrameRef.current) {
+            cancelAnimationFrame(animationFrameRef.current);
+            animationFrameRef.current = null; // Clear ref
+        }
+    };
+  }, [animate]); // Key dependency: Run this effect when the 'animate' function reference changes
 
   return (
     <div 

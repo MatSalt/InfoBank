@@ -2,6 +2,15 @@
  * Live2D 립싱크를 위한 오디오 프로세서 유틸리티
  * - 오디오 데이터를 분석하여 립싱크에 사용할 정규화된 값을 제공합니다.
  */
+
+// window 객체에 AudioContext와 webkitAudioContext 타입을 명시적으로 정의
+interface CustomWindow extends Window {
+  AudioContext: typeof AudioContext;
+  webkitAudioContext?: typeof AudioContext; // webkitAudioContext는 선택 사항
+}
+
+declare const window: CustomWindow;
+
 export class LiveAudioProcessor {
   private _audioContext: AudioContext | null = null;
   private _analyser: AnalyserNode | null = null;
@@ -12,7 +21,13 @@ export class LiveAudioProcessor {
 
   constructor() {
     try {
-      this._audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      // window 전역 객체에서 AudioContext 또는 webkitAudioContext 가져오기
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) {
+        throw new Error('AudioContext is not supported in this browser.');
+      }
+      this._audioContext = new AudioContextClass();
+
       this._analyser = this._audioContext.createAnalyser();
       this._analyser.fftSize = 256;
       const bufferLength = this._analyser.frequencyBinCount;
@@ -86,14 +101,25 @@ export class LiveAudioProcessor {
       const normalizedValue = Math.min(1, rms / 32768); // 16비트 최대값으로 정규화
       console.log(`[AudioProcessor] rms: ${rms.toFixed(4)}, normalized: ${normalizedValue.toFixed(4)}`); // RMS 및 정규화 값 로그
       
-      // 부드러운 립싱크를 위한 보간
-      this._lastAudioValue = this._lastAudioValue * this._smoothingFactor + 
+      // 부드러운 립싱크를 위한 보간 (스무딩)
+      this._lastAudioValue = this._lastAudioValue * this._smoothingFactor +
                             normalizedValue * (1 - this._smoothingFactor);
-      
-      // 추가적인 비선형 맵핑 적용 (필요에 따라 조정)
-      const mappedValue = Math.pow(this._lastAudioValue, 0.6); // 지수 맵핑으로 낮은 값 강화
+
+      // --- holoVRM 스타일 변환 로직 적용 ---
+      // 기존 지수 맵핑: const mappedValue = Math.pow(this._lastAudioValue, 0.6);
+      let mappedValue = 1 / (1 + Math.exp(-45 * this._lastAudioValue + 5)); // 시그모이드 유사 변환 (민감도 계수 -45, 5는 조정 가능)
+
+      // 임계값 처리: 매우 작은 값은 0으로 만듦
+      if (mappedValue < 0.1) {
+        mappedValue = 0;
+      }
+
+      // 최종 값 범위 제한 (0.0 ~ 1.0)
+      mappedValue = Math.max(0.0, Math.min(1.0, mappedValue));
+      // -------------------------------------
+
       console.log(`[AudioProcessor] smoothed: ${this._lastAudioValue.toFixed(4)}, mapped: ${mappedValue.toFixed(4)}`); // 최종 값 로그
-      
+
       return mappedValue;
     } catch (error) {
       console.error('오디오 데이터 처리 중 오류:', error);
@@ -142,10 +168,17 @@ export class LiveAudioProcessor {
   public reset(): void {
     try {
       if (this._audioContext) {
-        this._audioContext.close();
+        this._audioContext.close().catch(console.error); // close()는 Promise를 반환할 수 있음
+        this._audioContext = null; // 명시적으로 null 설정
       }
-      
-      this._audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+
+      // window 전역 객체에서 AudioContext 또는 webkitAudioContext 가져오기
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) {
+        throw new Error('AudioContext is not supported in this browser.');
+      }
+      this._audioContext = new AudioContextClass();
+
       this._analyser = this._audioContext.createAnalyser();
       this._analyser.fftSize = 256;
       this._dataArray = new Uint8Array(this._analyser.frequencyBinCount);
