@@ -28,9 +28,8 @@ interface UseVoiceStreamingReturn {
   stopRecording: () => void;
   isMicDisabled: boolean;
   micStatusMessage: string;
-  isPlayingAudio: boolean;
   processingTime: number | null;
-  lastAudioData: Uint8Array | null; // 추가: 마지막으로 받은 오디오 데이터
+  lastAudioData: Uint8Array | null;
 }
 
 // 전역 Window 인터페이스 확장
@@ -45,8 +44,8 @@ declare global {
  * @returns {UseVoiceStreamingReturn} 음성 스트리밍 관련 상태 및 제어 함수
  */
 export function useVoiceStreaming(): UseVoiceStreamingReturn {
-  // 오디오 컨텍스트 가져오기
-  const { processingAudio } = useAudio();
+  // 오디오 컨텍스트 가져오기 (clearAudio 포함)
+  const { processingAudio, clearAudio } = useAudio();
 
   // 상태 변수들 (타입 명시)
   const [isRecording, setIsRecording] = useState<boolean>(false);
@@ -57,7 +56,6 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
   const [transcript, setTranscript] = useState<string>('');
   const [isMicDisabled, setIsMicDisabled] = useState<boolean>(false);
   const [micStatusMessage, setMicStatusMessage] = useState<string>('');
-  const [isPlayingAudio, setIsPlayingAudio] = useState<boolean>(false);
   const [processingTime, setProcessingTime] = useState<number | null>(null);
   const [lastAudioData, setLastAudioData] = useState<Uint8Array | null>(null); // 추가: 마지막 오디오 데이터 상태
 
@@ -107,7 +105,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
     }
   }, []);
 
-  // 오디오 스트림 중지 함수
+  // 오디오 스트림 중지 함수 - clearAudio 호출 추가
   const stopAudioStream = useCallback((): void => {
     if (audioStreamRef.current) {
       audioStreamRef.current.getTracks().forEach(track => track.stop());
@@ -135,7 +133,11 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
     // 오디오 큐 초기화
     audioQueueRef.current = [];
     isPlayingRef.current = false;
-  }, []);
+
+    // AudioContext 상태 초기화 호출
+    clearAudio();
+    console.log("[stopAudioStream] clearAudio 호출됨");
+  }, [clearAudio]); // clearAudio 의존성 추가
 
   // 녹음 중지 함수 - 먼저 정의
   const stopRecording = useCallback((): void => {
@@ -261,12 +263,12 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
     });
   }, [processingAudio]);
 
-  // 그 다음에 processAudioQueue 함수 선언
+  // 그 다음에 processAudioQueue 함수 선언 - clearAudio 호출 추가
   const processAudioQueue = useCallback(async (): Promise<void> => {
     if (isPlayingRef.current || audioQueueRef.current.length === 0) return;
 
     isPlayingRef.current = true;
-    setIsPlayingAudio(true); // UI 상태 업데이트
+    // setIsPlayingAudio(true); // UI 상태 업데이트는 AudioContext에서 하므로 여기서 제거
     console.log(`오디오 큐 처리 시작... (${audioQueueRef.current.length}개 항목)`);
 
     // 큐에 있는 모든 오디오 데이터를 순차적으로 재생
@@ -283,7 +285,8 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
             // 오류 발생 시 큐 처리 중단 또는 계속 진행 결정
             // 여기서는 일단 중단하고 재생 상태 해제
             isPlayingRef.current = false;
-            console.log("오디오 큐 처리 중 오류로 인해 중단됨.");
+            clearAudio(); // 오류 시에도 상태 초기화
+            console.log("오디오 큐 처리 중 오류로 인해 중단 및 clearAudio 호출됨.");
             return; // 함수 종료
         }
       }
@@ -291,14 +294,15 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
 
     // 모든 큐 처리가 성공적으로 완료되면 재생 상태 해제
     isPlayingRef.current = false;
-    setIsPlayingAudio(false); // UI 상태 업데이트
-    console.log("오디오 큐 처리 완료.");
-    
+    // setIsPlayingAudio(false); // UI 상태 업데이트는 AudioContext에서 하므로 여기서 제거
+    clearAudio(); // 모든 오디오 재생 완료 후 상태 초기화
+    console.log("오디오 큐 처리 완료 및 clearAudio 호출됨.");
+
     if (pendingMicEnableRef.current) {
       console.log("모든 오디오 재생 완료 후 마이크 활성화 실행");
       enableMicrophone(pendingMicMessageRef.current);
     }
-  }, [playAudioChunk, enableMicrophone]); // playAudioChunk 함수에 의존
+  }, [playAudioChunk, enableMicrophone, clearAudio]); // clearAudio 의존성 추가
 
   // WebSocket 연결 설정 함수
   const setupWebSocket = useCallback((): Promise<WebSocket> => {
@@ -557,8 +561,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
     stopRecording,
     isMicDisabled,
     micStatusMessage,
-    isPlayingAudio,
     processingTime,
-    lastAudioData, // 추가: 마지막 오디오 데이터
+    lastAudioData,
   };
 }

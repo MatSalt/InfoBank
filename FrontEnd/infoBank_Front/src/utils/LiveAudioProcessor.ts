@@ -17,7 +17,7 @@ export class LiveAudioProcessor {
   private _dataArray: Uint8Array | null = null;
   private _lastAudioValue: number = 0;
   private _isProcessing: boolean = false;
-  private _smoothingFactor: number = 0.5; // 값이 클수록 립싱크가 더 부드러워짐 (0~1)
+  private _smoothingFactor: number = 0.15; // 값이 작을수록 더 빠르게 반응 (0~1)
 
   constructor() {
     try {
@@ -34,7 +34,7 @@ export class LiveAudioProcessor {
       this._dataArray = new Uint8Array(bufferLength);
       
       // 분석기 설정
-      this._analyser.smoothingTimeConstant = 0.5; // 주파수 분석 스무딩 (0~1)
+      this._analyser.smoothingTimeConstant = 0.15; // 주파수 분석 스무딩 (0~1)
       
       console.log('AudioProcessor 초기화됨');
     } catch (error) {
@@ -105,14 +105,13 @@ export class LiveAudioProcessor {
       this._lastAudioValue = this._lastAudioValue * this._smoothingFactor +
                             normalizedValue * (1 - this._smoothingFactor);
 
-      // --- holoVRM 스타일 변환 로직 적용 ---
-      // 기존 지수 맵핑: const mappedValue = Math.pow(this._lastAudioValue, 0.6);
-      let mappedValue = 1 / (1 + Math.exp(-45 * this._lastAudioValue + 5)); // 시그모이드 유사 변환 (민감도 계수 -45, 5는 조정 가능)
+      // --- 매핑 로직 수정: 지수 매핑 사용 및 조정 ---
+      // 기존 로직 주석 처리
+      // let mappedValue = 1 / (1 + Math.exp(-30 * this._lastAudioValue + 5));
+      // if (mappedValue < 0.1) { mappedValue = 0; } // 임계값 제거
 
-      // 임계값 처리: 매우 작은 값은 0으로 만듦
-      if (mappedValue < 0.1) {
-        mappedValue = 0;
-      }
+      // 수정된 매핑: 지수값 조정 (0.25 -> 0.5)
+      let mappedValue = Math.pow(this._lastAudioValue, 0.5);
 
       // 최종 값 범위 제한 (0.0 ~ 1.0)
       mappedValue = Math.max(0.0, Math.min(1.0, mappedValue));
@@ -193,7 +192,7 @@ export class LiveAudioProcessor {
   
   /**
    * 립싱크 부드러움 정도를 설정합니다.
-   * @param factor 스무딩 팩터 (0~1), 값이 클수록 더 부드러워짐
+   * @param factor 스무딩 팩터 (0~1), 값이 작을수록 더 빠르게 반응
    */
   public setSmoothingFactor(factor: number): void {
     this._smoothingFactor = Math.max(0, Math.min(1, factor));

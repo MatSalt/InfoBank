@@ -14,7 +14,7 @@ const Live2DCanvas = ({ modelPath }) => {
   const animationFrameRef = useRef(null);
   const audioProcessorRef = useRef(null);
   const [lipSyncEnabled, setLipSyncEnabled] = useState(false);
-  const [lipSyncValue, setLipSyncValue] = useState(0);
+  const currentLipSyncValueRef = useRef(0);
   const [lipSyncParams, setLipSyncParams] = useState(null);
   const { audioData, isAudioPlaying } = useAudio();
 
@@ -31,72 +31,80 @@ const Live2DCanvas = ({ modelPath }) => {
 
   // 오디오 데이터 및 재생 상태 변경 처리
   useEffect(() => {
-    // --- 추가할 로그 ---
-    console.log('[Debug] 오디오 상태 변경 감지:', { isAudioPlaying, hasAudioData: !!audioData }); 
-    // ------------------
+    console.log('[Debug] 오디오 상태 변경 감지:', { isAudioPlaying, hasAudioData: !!audioData });
 
-    if (isAudioPlaying && audioData && audioProcessorRef.current && modelRef.current) {
+    if (isAudioPlaying && audioData && audioProcessorRef.current) {
       try {
+        // processAudioData 호출하여 값 계산
         const value = audioProcessorRef.current.processAudioData(audioData);
-        setLipSyncValue(value);
-        setLipSyncEnabled(true); // 오디오 재생 중일 때만 활성화
-        console.log('오디오 데이터 처리됨, 립싱크 값:', value); // 로그 주석 해제
+        // 상태 대신 ref에 직접 값 할당
+        currentLipSyncValueRef.current = value;
+        console.log('오디오 데이터 처리됨, 립싱크 값 (ref): ', currentLipSyncValueRef.current.toFixed(4));
+
+        // lipSyncEnabled 상태는 유지 (언제 립싱크를 적용할지 결정하기 위함)
+        if (!lipSyncEnabled) {
+           setLipSyncEnabled(true);
+        }
+
       } catch (error) {
         console.error('오디오 데이터 처리 오류:', error);
-        setLipSyncEnabled(false); // 오류 발생 시 비활성화
+        setLipSyncEnabled(false);
+        currentLipSyncValueRef.current = 0; // 오류 시 0으로 초기화
       }
     } else {
       // 오디오 재생 중이 아니거나 데이터가 없으면 비활성화 및 값 초기화
       if (lipSyncEnabled) { // 상태 변경 최소화를 위해 조건 추가
         console.log('[LipSync] 오디오 중지됨, 립싱크 비활성화');
         setLipSyncEnabled(false);
-        setLipSyncValue(0);
+        // ref 값 초기화
+        currentLipSyncValueRef.current = 0;
+
+        // 오디오 중지 시 즉시 파라미터 0으로 설정 (이전 코드 유지)
+        if (modelRef.current) {
+          try {
+            console.log('[Debug][useEffect] Force setting ParamMouthOpenY = 0');
+            modelRef.current.internalModel.coreModel.setParameterValueById('ParamMouthOpenY', 0);
+          } catch (error) {
+            console.error('Error setting mouth parameter to 0 in useEffect:', error);
+          }
+        }
       }
     }
-  }, [audioData, isAudioPlaying]); // lipSyncEnabled 의존성 제거
+    // isAudioPlaying, lipSyncEnabled는 의존성 배열에 유지
+    // audioData는 너무 자주 변경될 수 있으므로, 변경 시마다 ref를 업데이트하되
+    // useEffect 자체를 너무 자주 트리거하지 않도록 audioData 자체는 배열에서 제거하거나
+    // 다른 방식으로 처리하는 것을 고려해볼 수 있음 (지금은 유지)
+  }, [audioData, isAudioPlaying, lipSyncEnabled]);
 
   // 립싱크 파라미터 업데이트 함수
   const updateLipSync = useCallback(() => {
-    // 함수 진입 및 상태 값 로깅 (기존 로그 주석 해제 또는 추가)
-    // console.log(`[updateLipSync] Called. Enabled: ${lipSyncEnabled}, Value: ${lipSyncValue}`);
+    if (!modelRef.current) return; // 모델 없으면 아무것도 안함
 
-    if (!modelRef.current || !lipSyncEnabled || !Array.isArray(lipSyncParams) || lipSyncParams.length === 0) {
-      // --- 조건 불충족 시 로그 추가 ---
-      // console.log('[Debug][updateLipSync] Condition not met. Skipping update.');
-      // --------------------------
-      return;
+    let valueToSet = 0; // 기본값 0 (입 닫힘)
+
+    // lipSyncEnabled 상태를 확인하여 값 결정
+    if (lipSyncEnabled) {
+      // 상태 대신 ref에서 현재 값 가져오기
+      valueToSet = currentLipSyncValueRef.current;
+
+      // 값 범위 제한 (0.0 ~ 1.0)
+      valueToSet = Math.max(0.0, Math.min(1.0, valueToSet));
     }
+    // else (lipSyncEnabled가 false면) valueToSet은 0 유지
 
     try {
-      const model = modelRef.current;
+      // 항상 ParamMouthOpenY 값을 설정
+      // 최종 적용 직전에 값 로깅
+      console.log(`[Live2DCanvas][updateLipSync] Setting ParamMouthOpenY = ${valueToSet.toFixed(4)} (Enabled: ${lipSyncEnabled})`);
+      modelRef.current.internalModel.coreModel.setParameterValueById('ParamMouthOpenY', valueToSet);
 
-      // === Parameter Setting (Force coreModel) ===
-      if (lipSyncParams.includes('ParamMouthOpenY')) {
-        const valueToSet = lipSyncValue; // 수정: 계산된 값을 그대로 사용 (0.0 ~ 1.0 범위 가정)
-
-        // --- 추가할 로그 ---
-        console.log(`[Debug][updateLipSync] Applying ParamMouthOpenY = ${valueToSet} (Raw Value: ${lipSyncValue})`);
-        // ------------------
-
-        // 값 범위 제한 (선택 사항, 안전 장치) - 필요시 주석 해제
-        // const clampedValue = Math.max(0.0, Math.min(1.0, valueToSet));
-        // model.internalModel.coreModel.setParameterValueById('ParamMouthOpenY', clampedValue);
-
-        model.internalModel.coreModel.setParameterValueById('ParamMouthOpenY', valueToSet);
-      }
-
-      // 입 모양 파라미터 (ParamMouthForm) - Haru 모델은 이 파라미터를 LipSync 그룹에 포함하지 않음
-      if (lipSyncParams.includes('ParamMouthForm')) {
-        const mouthForm = (lipSyncValue > 0.5) ? 1.0 : 0; // 값 유지
-        console.log(`[LipSync] Setting ParamMouthForm via coreModel to: ${mouthForm}`); // 주석 해제 (실행되지는 않을 것임)
-        model.internalModel.coreModel.setParameterValueById('ParamMouthForm', mouthForm);
-      }
-      // ======================================
+      // ParamMouthForm 부분은 Haru 모델에서 사용 안 함 (그대로 둠)
+      // ...
 
     } catch (error) {
-      console.error('립싱크 업데이트 오류:', error);
+      console.error('립싱크 파라미터 업데이트 오류:', error);
     }
-  }, [lipSyncEnabled, lipSyncParams, lipSyncValue]);
+  }, [lipSyncEnabled, lipSyncParams]); // lipSyncValue 상태 의존성 제거, lipSyncEnabled, lipSyncParams 유지
 
   // 애니메이션 프레임 업데이트 함수 (useCallback 유지)
   const animate = useCallback(() => {
