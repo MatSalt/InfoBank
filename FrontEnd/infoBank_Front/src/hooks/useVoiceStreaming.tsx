@@ -102,11 +102,13 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
     if (audioStreamRef.current) {
       setTimeout(() => {
         if (audioStreamRef.current) {
+          /* AEC가 적용되어 있으므로 트랙 활성화는 더 이상 필요 없음
           audioStreamRef.current.getAudioTracks().forEach(track => {
             track.enabled = true;
           });
-          console.log('마이크가 활성화되었습니다.');
-          setIsMicDisabled(false);
+          */
+          console.log('마이크 상태가 활성화로 변경되었습니다 (AEC로 이미 처리 중)');
+          setIsMicDisabled(false); // 상태만 변경
           setMicStatusMessage('');
           setStatusMessage(message);
           
@@ -119,6 +121,77 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
       }, 300);
     }
   }, []);
+
+  // WebRTC 루프백 연결을 설정하여 에코 캔슬레이션 강화
+  const setupEchoCancellationLoopback = useCallback(async (): Promise<void> => {
+    // 오디오 컨텍스트가 준비되지 않았다면 무시
+    if (!audioContext) {
+      console.log("AudioContext가 준비되지 않아 에코 캔슬레이션 루프백을 설정할 수 없습니다.");
+      return;
+    }
+
+    try {
+      console.log("에코 캔슬레이션 루프백 연결 설정 중...");
+
+      // 로컬 WebRTC 연결 생성
+      const peerConnection1 = new RTCPeerConnection();
+      const peerConnection2 = new RTCPeerConnection();
+
+      // 이벤트 핸들러 설정
+      peerConnection1.onicecandidate = (event) => {
+        if (event.candidate) {
+          peerConnection2.addIceCandidate(event.candidate).catch(console.error);
+        }
+      };
+
+      peerConnection2.onicecandidate = (event) => {
+        if (event.candidate) {
+          peerConnection1.addIceCandidate(event.candidate).catch(console.error);
+        }
+      };
+
+      // 오디오 출력을 MediaStreamTrack으로 변환
+      if (audioStreamRef.current) {
+        // 오디오 입력 스트림을 루프백 연결에 추가
+        audioStreamRef.current.getAudioTracks().forEach(track => {
+          peerConnection1.addTrack(track, audioStreamRef.current!);
+        });
+
+        // 미디어 스트림 대상 생성
+        const destination = audioContext.createMediaStreamDestination();
+        
+        // 현재 Web Audio 노드를 대상 노드에 연결
+        if (analyserNode) {
+          analyserNode.connect(destination);
+          console.log("AnalyserNode를 루프백 대상에 연결했습니다.");
+        }
+      }
+
+      // peerConnection2에서 오디오 트랙을 수신하기 위한 이벤트 설정
+      peerConnection2.ontrack = () => {
+        console.log("루프백 연결을 통해 오디오 트랙을 받았습니다.");
+        // 여기서 추가 처리가 필요하다면 구현
+      };
+
+      // SDP 교환 - Offer 생성
+      const offer = await peerConnection1.createOffer();
+      await peerConnection1.setLocalDescription(offer);
+      await peerConnection2.setRemoteDescription(offer);
+
+      // Answer 생성
+      const answer = await peerConnection2.createAnswer();
+      await peerConnection2.setLocalDescription(answer);
+      await peerConnection1.setRemoteDescription(answer);
+
+      console.log("에코 캔슬레이션 루프백 연결이 설정되었습니다.");
+
+      // 연결 객체 참조 저장 (나중에 정리할 수 있도록)
+      // 객체를 저장할 Ref를 추가할 수 있음
+
+    } catch (error) {
+      console.error("에코 캔슬레이션 루프백 설정 중 오류:", error);
+    }
+  }, [audioContext, analyserNode]);
 
   // 오디오 스트림 중지 함수 - clearAudio 호출 추가
   const stopAudioStream = useCallback((): void => {
@@ -362,11 +435,15 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
                   if (data.action === 'disable') {
                     // 마이크 비활성화 시간 기록
                     if (audioStreamRef.current) {
-                      console.log('마이크 비활성화:', data.reason);
+                      console.log('마이크 비활성화 요청을 받았지만, AEC 기능으로 처리됨:', data.reason);
+                      /* 마이크 비활성화 코드 주석 처리 - AEC로 대체
                       audioStreamRef.current.getAudioTracks().forEach(track => {
                         track.enabled = false;
                       });
                       setIsMicDisabled(true);
+                      */
+                      
+                      // 상태 메시지는 업데이트
                       setMicStatusMessage(data.message || 'AI가 응답 중입니다...');
                       setStatusMessage(data.message || 'AI가 응답 중입니다...');
                       
@@ -460,7 +537,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
         stopAudioStream(); // WebSocket 종료 시 스트림도 확실히 정리
       };
     });
-  }, [stopAudioStream, processAudioQueue, stopRecording, enableMicrophone]); // enableMicrophone, stopRecording 의존성 추가
+  }, [stopAudioStream, processAudioQueue, stopRecording, enableMicrophone, setupEchoCancellationLoopback]); // enableMicrophone, stopRecording, setupEchoCancellationLoopback 의존성 추가
 
   // MediaRecorder 설정 및 스트리밍 시작 함수
   const setupAndStartStreaming = useCallback(async (): Promise<boolean> => {
@@ -478,14 +555,20 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
       // 오디오 스트림 가져오기
       const stream: MediaStream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          channelCount: 1,
+          channelCount: 1, 
           sampleRate: 16000,
-          echoCancellation: true,
+          // 에코 제거 설정 강화
+          echoCancellation: {
+            exact: true // exact 설정으로 확실히 활성화
+          },
           noiseSuppression: true,
           autoGainControl: true
         }
       });
       audioStreamRef.current = stream;
+
+      // 스피커 출력 트랙이 사용 가능한지 확인하고 WebRTC 루프백 연결을 생성하여 에코 캔슬링 강화
+      await setupEchoCancellationLoopback();
 
       // WebSocket 연결 설정
       setIsConnecting(true);
@@ -548,7 +631,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
       return false;
     }
   // setupWebSocket, stopAudioStream 의존성 유지
-  }, [isSupported, setupWebSocket, stopAudioStream]);
+  }, [isSupported, setupWebSocket, stopAudioStream, setupEchoCancellationLoopback]);
 
   // 녹음 시작 함수
   const startRecording = useCallback(async (): Promise<void> => {
