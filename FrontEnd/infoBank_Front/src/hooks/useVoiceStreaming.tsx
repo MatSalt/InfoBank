@@ -537,7 +537,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
         stopAudioStream(); // WebSocket 종료 시 스트림도 확실히 정리
       };
     });
-  }, [stopAudioStream, processAudioQueue, stopRecording, enableMicrophone, setupEchoCancellationLoopback]); // enableMicrophone, stopRecording, setupEchoCancellationLoopback 의존성 추가
+  }, [stopAudioStream, processAudioQueue, stopRecording, enableMicrophone]); // enableMicrophone, stopRecording, processAudioQueue 의존성 추가
 
   // MediaRecorder 설정 및 스트리밍 시작 함수
   const setupAndStartStreaming = useCallback(async (): Promise<boolean> => {
@@ -631,7 +631,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
       return false;
     }
   // setupWebSocket, stopAudioStream 의존성 유지
-  }, [isSupported, setupWebSocket, stopAudioStream, setupEchoCancellationLoopback]);
+  }, [isSupported, setupWebSocket, stopAudioStream]);
 
   // 녹음 시작 함수
   const startRecording = useCallback(async (): Promise<void> => {
