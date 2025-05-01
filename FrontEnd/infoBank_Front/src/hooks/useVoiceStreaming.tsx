@@ -631,7 +631,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
       return false;
     }
   // setupWebSocket, stopAudioStream 의존성 유지
-  }, [isSupported, setupWebSocket, stopAudioStream]);
+  }, [isSupported, setupWebSocket, stopAudioStream, setupEchoCancellationLoopback]);
 
   // 녹음 시작 함수
   const startRecording = useCallback(async (): Promise<void> => {
