@@ -190,14 +190,47 @@ async def websocket_endpoint(websocket: WebSocket):
                     logger.error(f"[{client_id}] 오류 후 마이크 활성화 메시지 전송 중 추가 오류: {send_err}")
 
     # --- STT 결과 처리 콜백 ---
-    async def process_stt_result(transcript: str, is_final: bool):
-        """STT 결과를 처리하고 LLM->TTS 파이프라인을 시작합니다."""
+    async def process_stt_result(transcript: str, is_final: bool, speech_event=None):
+        """STT 결과 또는 음성 활동 이벤트를 처리합니다."""
         nonlocal is_connected, llm_tts_tasks
         
         if not is_connected:
-            logger.warning(f"[{client_info}] 연결이 끊어진 상태에서 STT 결과 수신. 무시합니다.")
+            logger.warning(f"[{client_info}] 연결이 끊어진 상태에서 STT 결과 또는 이벤트 수신. 무시합니다.")
             return
         
+        # 음성 활동 이벤트 처리
+        if speech_event and isinstance(speech_event, dict):
+            event_type = speech_event.get("type")
+            event_offset = speech_event.get("offset")
+            
+            logger.info(f"[{client_info}] 음성 활동 이벤트 처리: {event_type}, 오프셋: {event_offset}")
+            
+            # 음성 활동 시작 이벤트 처리 (인터럽션 감지)
+            if event_type == "SPEECH_ACTIVITY_BEGIN":
+                # 아바타가 말하고 있는지 확인 (활성 LLM/TTS 태스크가 있는지 확인)
+                is_avatar_speaking = len(llm_tts_tasks) > 0
+                
+                if is_avatar_speaking:
+                    logger.info(f"[{client_info}] 아바타 응답 중 사용자 음성 감지: 인터럽션 처리")
+                    
+                    # 인터럽션 처리
+                    await handle_interruption()
+                    
+                    # 클라이언트에게 인터럽션 알림
+                    if is_connected and websocket.client_state == WebSocketState.CONNECTED:
+                        try:
+                            await websocket.send_json({
+                                "control": "interruption",
+                                "status": "detected", 
+                                "message": "새로운 질문을 말씀해주세요"
+                            })
+                            logger.info(f"[{client_info}] 인터럽션 감지 알림을 클라이언트에 전송함")
+                        except Exception as e:
+                            logger.error(f"[{client_info}] 인터럽션 알림 전송 중 오류: {e}")
+            
+            return  # 음성 이벤트 처리 후 종료
+        
+        # 기존 텍스트 처리 코드
         if not transcript or not is_final:
             return  # 빈 텍스트나 중간 결과는 무시
         
@@ -223,6 +256,42 @@ async def websocket_endpoint(websocket: WebSocket):
         
         # 태스크 완료 시 집합에서 제거
         task.add_done_callback(lambda t: llm_tts_tasks.discard(t))
+
+    # --- 인터럽션 처리 함수 ---
+    async def handle_interruption():
+        """사용자 인터럽션 발생 시 현재 LLM/TTS 태스크를 취소하고 정리합니다."""
+        nonlocal llm_tts_tasks
+        
+        logger.info(f"[{client_info}] 인터럽션 처리 시작: {len(llm_tts_tasks)}개 태스크 취소")
+        
+        # 현재 LLM/TTS 태스크 취소 및 정리
+        tasks_to_cancel = list(llm_tts_tasks)
+        for task in tasks_to_cancel:
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    logger.debug(f"[{client_info}] 인터럽션으로 태스크 취소됨")
+                except Exception as e:
+                    logger.warning(f"[{client_info}] 인터럽션 처리 중 태스크 취소 오류: {e}")
+        
+        llm_tts_tasks.clear()  # 모든 태스크 제거
+        
+        # 사용자에게 마이크 활성화 메시지 전송
+        if is_connected and websocket.client_state == WebSocketState.CONNECTED:
+            try:
+                await websocket.send_json({
+                    "control": "mic_status",
+                    "action": "enable",
+                    "reason": "interruption",
+                    "message": "AI 응답이 중단되었습니다. 계속 말씀하세요."
+                })
+                logger.debug(f"[{client_info}] 인터럽션 후 마이크 활성화 요청 전송")
+            except Exception as e:
+                logger.error(f"[{client_info}] 인터럽션 후 마이크 활성화 메시지 전송 중 오류: {e}")
+        
+        logger.info(f"[{client_info}] 인터럽션 처리 완료")
 
     # --- 메인 루프: STT 관리 및 메시지 수신 ---
     try:
