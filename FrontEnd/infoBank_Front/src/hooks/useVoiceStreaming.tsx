@@ -21,6 +21,7 @@ interface WebSocketResponse {
   action?: string;
   reason?: string;
   message?: string;
+  status?: string;
 }
 
 // 커스텀 훅의 반환 타입 인터페이스
@@ -429,9 +430,26 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
             console.log('WebSocket 텍스트 메시지 수신:', event.data);
              try {
                 const data = JSON.parse(event.data) as WebSocketResponse;
-                
-                // 마이크 제어 메시지 처리
-                if (data.control === 'mic_status') {
+
+                // --- 인터럽션 처리 로직을 여기로 이동 ---
+                if (data.control === 'interruption' && data.status === 'detected') {
+                  console.log('인터럽션 감지됨, 오디오 재생 중단');
+
+                  // 오디오 큐 비우기
+                  audioQueueRef.current = [];
+
+                  // 재생 중인 오디오 중단 로직
+                  isPlayingRef.current = false;
+                  setIsPlayingAudio(false);
+                  clearAudio();
+
+                  // 마이크 즉시 활성화
+                  enableMicrophone("말씀하세요...");
+                }
+                // --- 인터럽션 처리 로직 끝 ---
+
+                // 기존 마이크 제어 메시지 처리
+                else if (data.control === 'mic_status') { // 'else if'로 변경하여 인터럽션 메시지와 중복 처리 방지
                   if (data.action === 'disable') {
                     // 마이크 비활성화 시간 기록
                     if (audioStreamRef.current) {
@@ -442,11 +460,11 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
                       });
                       setIsMicDisabled(true);
                       */
-                      
+
                       // 상태 메시지는 업데이트
                       setMicStatusMessage(data.message || 'AI가 응답 중입니다...');
                       setStatusMessage(data.message || 'AI가 응답 중입니다...');
-                      
+
                       // 마이크 비활성화 시간 기록
                       micDisabledTimeRef.current = Date.now();
                       isFirstAudioChunkRef.current = true; // 첫 오디오 플래그 초기화
@@ -456,7 +474,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
                     console.log('마이크 활성화 요청 받음 - 오디오 재생 완료 후 처리 예정:', data.reason);
                     pendingMicEnableRef.current = true;
                     pendingMicMessageRef.current = data.message || '말씀하세요...';
-                    
+
                     // 오디오 큐가 비어있는 경우에만 즉시 활성화
                     if (audioQueueRef.current.length === 0 && !isPlayingRef.current) {
                       enableMicrophone(pendingMicMessageRef.current);
@@ -465,8 +483,9 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
                     }
                   }
                 }
-                
-                if (data.transcript) {
+
+                // 기타 텍스트 기반 메시지 처리 (transcript, is_final, error 등)
+                if (data.transcript) { // 조건문을 분리하여 인터럽션/마이크 제어와 별개로 처리
                     setTranscript(prev => prev + data.transcript);
                     setStatusMessage('텍스트 수신 중...');
                 }
@@ -486,22 +505,22 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
         } else if (event.data instanceof ArrayBuffer) {
              // 서버에서 오디오 데이터를 보낸 경우의 처리 (TTS 결과 재생)
              console.log('WebSocket 바이너리 메시지 수신:', event.data.byteLength, 'bytes');
-             
+
              // 오디오 데이터를 큐에 추가
              const audioData = new Uint8Array(event.data);
              audioQueueRef.current.push(audioData);
-             
+
              // 오디오 큐 처리 시작
              processAudioQueue();
         } else if (event.data instanceof Blob) {
              // Blob 데이터를 ArrayBuffer로 변환하여 처리
              event.data.arrayBuffer().then(buffer => {
                 console.log('WebSocket Blob 메시지 수신:', buffer.byteLength, 'bytes');
-                
+
                 // 오디오 데이터를 큐에 추가
                 const audioData = new Uint8Array(buffer);
                 audioQueueRef.current.push(audioData);
-                
+
                 // 오디오 큐 처리 시작
                 processAudioQueue();
              }).catch(error => {

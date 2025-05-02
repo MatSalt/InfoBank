@@ -207,26 +207,23 @@ async def websocket_endpoint(websocket: WebSocket):
             
             # 음성 활동 시작 이벤트 처리 (인터럽션 감지)
             if event_type == "SPEECH_ACTIVITY_BEGIN":
-                # 아바타가 말하고 있는지 확인 (활성 LLM/TTS 태스크가 있는지 확인)
-                is_avatar_speaking = len(llm_tts_tasks) > 0
+                # 현재 오디오 재생 중인지 여부를 프론트엔드에 알림
+                if is_connected and websocket.client_state == WebSocketState.CONNECTED:
+                    try:
+                        await websocket.send_json({
+                            "control": "interruption",
+                            "status": "detected", 
+                            "message": "새로운 질문을 말씀해주세요"
+                        })
+                        logger.info(f"[{client_info}] 인터럽션 감지 알림을 클라이언트에 전송함")
+                    except Exception as e:
+                        logger.error(f"[{client_info}] 인터럽션 알림 전송 중 오류: {e}")
                 
+                # 백엔드 태스크가 실행 중인 경우에만 취소 처리
+                is_avatar_speaking = len(llm_tts_tasks) > 0
                 if is_avatar_speaking:
                     logger.info(f"[{client_info}] 아바타 응답 중 사용자 음성 감지: 인터럽션 처리")
-                    
-                    # 인터럽션 처리
                     await handle_interruption()
-                    
-                    # 클라이언트에게 인터럽션 알림
-                    if is_connected and websocket.client_state == WebSocketState.CONNECTED:
-                        try:
-                            await websocket.send_json({
-                                "control": "interruption",
-                                "status": "detected", 
-                                "message": "새로운 질문을 말씀해주세요"
-                            })
-                            logger.info(f"[{client_info}] 인터럽션 감지 알림을 클라이언트에 전송함")
-                        except Exception as e:
-                            logger.error(f"[{client_info}] 인터럽션 알림 전송 중 오류: {e}")
             
             return  # 음성 이벤트 처리 후 종료
         
