@@ -110,24 +110,24 @@ async def handle_stt_stream(audio_queue: asyncio.Queue, result_callback: callabl
             logger.debug(f"STT 서비스: 응답 속성: {dir(response)}")
             
             # 음성 활동 이벤트 확인
-            if hasattr(response, 'speechEventType') and response.speechEventType:
-                event_type = response.speechEventType
-                event_offset = response.speechEventOffset
+            if hasattr(response, 'speech_event_type') and response.speech_event_type:
+                event_type = response.speech_event_type
+                event_offset = response.speech_event_offset
                 
                 logger.info(f"STT 서비스: 음성 활동 이벤트 감지: {event_type}, 오프셋: {event_offset}")
                 logger.info(f"STT 서비스: 전체 응답 내용: {response}")
                 
-                # 음성 활동 시작 이벤트 처리
-                if event_type == "SPEECH_ACTIVITY_BEGIN":
+                # Enum 멤버와 직접 비교
+                if event_type == cloud_speech.StreamingRecognizeResponse.SpeechEventType.SPEECH_ACTIVITY_BEGIN:
                     # 음성 활동 시작 이벤트 콜백 전달
                     await result_callback(None, False, speech_event={
-                        "type": "SPEECH_ACTIVITY_BEGIN",
+                        "type": "SPEECH_ACTIVITY_BEGIN", # 콜백에는 문자열로 전달해도 괜찮음
                         "offset": event_offset
                     })
-                elif event_type == "SPEECH_ACTIVITY_END":
+                elif event_type == cloud_speech.StreamingRecognizeResponse.SpeechEventType.SPEECH_ACTIVITY_END:
                     # 음성 활동 종료 이벤트 콜백 전달
                     await result_callback(None, False, speech_event={
-                        "type": "SPEECH_ACTIVITY_END",
+                        "type": "SPEECH_ACTIVITY_END", # 콜백에는 문자열로 전달해도 괜찮음
                         "offset": event_offset
                     })
             
