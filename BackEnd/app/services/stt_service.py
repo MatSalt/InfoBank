@@ -62,6 +62,11 @@ async def handle_stt_stream(audio_queue: asyncio.Queue, result_callback: callabl
     """
     오디오 큐로부터 오디오를 받아 STT 스트리밍을 처리하고, 결과를 콜백으로 전달합니다.
     409 타임아웃 발생 시 STTTimeoutError를 발생시킵니다.
+    
+    Args:
+        audio_queue: 오디오 데이터를 포함하는 큐
+        result_callback: 결과 처리를 위한 콜백 함수.
+                         형식: async def callback(transcript, is_final, speech_event=None)
     """
     speech_client = None
     responses = None
@@ -86,7 +91,8 @@ async def handle_stt_stream(audio_queue: asyncio.Queue, result_callback: callabl
         streaming_config = cloud_speech.StreamingRecognitionConfig(
             config=recognition_config,
             streaming_features=cloud_speech.StreamingRecognitionFeatures(
-                interim_results=True
+                interim_results=True,
+                enable_voice_activity_events=True  # 음성 활동 이벤트 활성화
             )
         )
 
@@ -100,6 +106,32 @@ async def handle_stt_stream(audio_queue: asyncio.Queue, result_callback: callabl
         # 응답 처리
         async for response in responses:
             logger.debug(f"STT 서비스: Google로부터 응답 수신: {response}")
+            logger.debug(f"STT 서비스: 응답 타입: {type(response)}")
+            logger.debug(f"STT 서비스: 응답 속성: {dir(response)}")
+            
+            # 음성 활동 이벤트 확인
+            if hasattr(response, 'speechEventType') and response.speechEventType:
+                event_type = response.speechEventType
+                event_offset = response.speechEventOffset
+                
+                logger.info(f"STT 서비스: 음성 활동 이벤트 감지: {event_type}, 오프셋: {event_offset}")
+                logger.info(f"STT 서비스: 전체 응답 내용: {response}")
+                
+                # 음성 활동 시작 이벤트 처리
+                if event_type == "SPEECH_ACTIVITY_BEGIN":
+                    # 음성 활동 시작 이벤트 콜백 전달
+                    await result_callback(None, False, speech_event={
+                        "type": "SPEECH_ACTIVITY_BEGIN",
+                        "offset": event_offset
+                    })
+                elif event_type == "SPEECH_ACTIVITY_END":
+                    # 음성 활동 종료 이벤트 콜백 전달
+                    await result_callback(None, False, speech_event={
+                        "type": "SPEECH_ACTIVITY_END",
+                        "offset": event_offset
+                    })
+            
+            # 기존 결과 처리 코드
             if not response.results:
                 logger.debug("STT 서비스: 결과 없는 응답 수신.")
                 continue
