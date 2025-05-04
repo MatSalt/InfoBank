@@ -201,13 +201,14 @@ async def websocket_endpoint(websocket: WebSocket):
         # 음성 활동 이벤트 처리
         if speech_event and isinstance(speech_event, dict):
             event_type = speech_event.get("type")
-            event_offset = speech_event.get("offset")
             
-            logger.info(f"[{client_info}] 음성 활동 이벤트 처리: {event_type}, 오프셋: {event_offset}")
+            logger.info(f"[{client_info}] 이벤트 처리: {event_type}")
             
-            # 음성 활동 시작 이벤트 처리 (인터럽션 감지)
-            if event_type == "SPEECH_ACTIVITY_BEGIN":
-                # 현재 오디오 재생 중인지 여부를 프론트엔드에 알림
+            # 인터럽션 신호 처리 (response 객체 기반)
+            if event_type == "INTERRUPTION_SIGNAL":
+                logger.info(f"[{client_info}] 인터럽션 신호 감지: 인터럽션 처리")
+                
+                # 인터럽션 처리 전에 클라이언트에 알림
                 if is_connected and websocket.client_state == WebSocketState.CONNECTED:
                     try:
                         await websocket.send_json({
@@ -219,13 +220,14 @@ async def websocket_endpoint(websocket: WebSocket):
                     except Exception as e:
                         logger.error(f"[{client_info}] 인터럽션 알림 전송 중 오류: {e}")
                 
-                # 백엔드 태스크가 실행 중인 경우에만 취소 처리
+                # 아바타가 말하는 중이라면 인터럽션 처리 함수 호출
                 is_avatar_speaking = len(llm_tts_tasks) > 0
                 if is_avatar_speaking:
-                    logger.info(f"[{client_info}] 아바타 응답 중 사용자 음성 감지: 인터럽션 처리")
+                    # 인터럽션 처리 함수 호출
                     await handle_interruption()
+                return  # 인터럽션 처리 후 종료
             
-            return  # 음성 이벤트 처리 후 종료
+            return  # 이벤트 처리 후 종료
         
         # 기존 텍스트 처리 코드
         if not transcript or not is_final:

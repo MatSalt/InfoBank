@@ -91,8 +91,7 @@ async def handle_stt_stream(audio_queue: asyncio.Queue, result_callback: callabl
         streaming_config = cloud_speech.StreamingRecognitionConfig(
             config=recognition_config,
             streaming_features=cloud_speech.StreamingRecognitionFeatures(
-                interim_results=True,
-                enable_voice_activity_events=True  # 음성 활동 이벤트 활성화
+                interim_results=True
             )
         )
 
@@ -103,33 +102,29 @@ async def handle_stt_stream(audio_queue: asyncio.Queue, result_callback: callabl
         logger.info("STT 서비스: 스트리밍 인식 시작...")
         responses = await speech_client.streaming_recognize(requests=requests)
 
+        # 음성 검출을 추적하기 위한 변수
+        last_response_time = None
+        
         # 응답 처리
         async for response in responses:
             logger.debug(f"STT 서비스: Google로부터 응답 수신: {response}")
             logger.debug(f"STT 서비스: 응답 타입: {type(response)}")
-            logger.debug(f"STT 서비스: 응답 속성: {dir(response)}")
             
-            # 음성 활동 이벤트 확인
-            if hasattr(response, 'speech_event_type') and response.speech_event_type:
-                event_type = response.speech_event_type
-                event_offset = response.speech_event_offset
-                
-                logger.info(f"STT 서비스: 음성 활동 이벤트 감지: {event_type}, 오프셋: {event_offset}")
-                logger.info(f"STT 서비스: 전체 응답 내용: {response}")
-                
-                # Enum 멤버와 직접 비교
-                if event_type == cloud_speech.StreamingRecognizeResponse.SpeechEventType.SPEECH_ACTIVITY_BEGIN:
-                    # 음성 활동 시작 이벤트 콜백 전달
-                    await result_callback(None, False, speech_event={
-                        "type": "SPEECH_ACTIVITY_BEGIN", # 콜백에는 문자열로 전달해도 괜찮음
-                        "offset": event_offset
-                    })
-                elif event_type == cloud_speech.StreamingRecognizeResponse.SpeechEventType.SPEECH_ACTIVITY_END:
-                    # 음성 활동 종료 이벤트 콜백 전달
-                    await result_callback(None, False, speech_event={
-                        "type": "SPEECH_ACTIVITY_END", # 콜백에는 문자열로 전달해도 괜찮음
-                        "offset": event_offset
-                    })
+            # 모든 response 수신은 인터럽션 신호로 간주할 수 있음
+            # response 객체 존재 자체가 음성 입력이 있다는 신호로 간주
+            current_time = asyncio.get_event_loop().time()
+            
+            # 새로운 인터럽션 신호 처리 - 음성 검출을 response 객체로 판단
+            # 충분한 시간 간격이 있는 경우에만 인터럽션으로 처리
+            # (너무 빈번한 인터럽션 방지)
+            if last_response_time is None or (current_time - last_response_time) > 1.0:
+                # response 객체 수신 자체를 인터럽션 신호로 간주하여 콜백 호출
+                await result_callback(None, False, speech_event={
+                    "type": "INTERRUPTION_SIGNAL"
+                })
+                logger.debug("STT 서비스: 인터럽션 신호 전달 (response 객체 수신)")
+            
+            last_response_time = current_time
             
             # 기존 결과 처리 코드
             if not response.results:
