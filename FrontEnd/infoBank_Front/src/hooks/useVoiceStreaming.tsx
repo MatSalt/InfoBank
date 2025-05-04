@@ -93,6 +93,9 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
   const micDisabledTimeRef = useRef<number | null>(null);
   const isFirstAudioChunkRef = useRef<boolean>(true);
 
+  // 음성 스트리밍 훅 내부에 useRef 추가
+  const activeSourceNodes = useRef<AudioBufferSourceNode[]>([]);
+
   // 브라우저 지원 여부 확인
   useEffect(() => {
     setIsSupported(!!(navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function' && window.WebSocket));
@@ -249,6 +252,28 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
     // webSocketRef, audioStreamRef는 onclose 또는 stopAudioStream에서 정리됨
   }, [stopAudioStream]);
 
+  // 인터럽션 감지 핸들러 수정
+  const handleInterruption = useCallback(() => {
+    console.log('인터럽션 감지됨, 오디오 재생 중단');
+    
+    // 모든 활성 소스 노드 중지
+    activeSourceNodes.current.forEach(node => {
+      try {
+        node.stop();
+      } catch {
+        // 이미 중지된 노드는 무시
+      }
+    });
+    
+    // 배열 초기화
+    activeSourceNodes.current = [];
+    
+    // 오디오 큐 비우기
+    audioQueueRef.current = [];
+    
+    clearAudio();
+  }, [clearAudio]);
+
   // 오디오 재생 함수 수정
   const playAudioChunk = useCallback(async (audioData: Uint8Array): Promise<void> => {
     // *** 초기화 및 컨텍스트 유효성 검사 강화 ***
@@ -315,38 +340,45 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
         // ------------------------------------
 
         // 수동으로 생성된 AudioBuffer를 사용하여 소스 노드 생성
-        const source = audioContext.createBufferSource();
-        source.buffer = audioBuffer; // 직접 생성한 버퍼 할당
-
-        // AnalyserNode 또는 destination에 연결
+        const sourceNode = audioContext.createBufferSource();
+        sourceNode.buffer = audioBuffer;
+        
+        // analyserNode가 null인지 확인
         if (analyserNode) {
-            source.connect(analyserNode);
-            // Provider에서 AnalyserNode를 destination에 미리 연결했으므로,
-            // 여기서는 source -> analyser 연결만 하면 됨.
-            console.log('Audio source connected to AnalyserNode.');
+          sourceNode.connect(analyserNode);
+          console.log('Audio source connected to AnalyserNode.');
         } else {
-            // AnalyserNode 없으면 바로 destination 연결
-            source.connect(audioContext.destination);
-            console.warn('AnalyserNode not available, connecting source directly to destination.');
+          sourceNode.connect(audioContext.destination);
+          console.warn('AnalyserNode not available, connecting source directly to destination.');
         }
-
-        console.log(`오디오 청크 재생 시작 (Manually created buffer, ${numberOfSamples} samples)`);
-
-        source.onended = () => {
-          console.log(`오디오 청크 재생 완료 (Manually created buffer)`);
-          try {
-              source.disconnect(); // 연결 해제 시도
-          } catch (disconnectError) {
-              // 이미 연결 해제된 경우 오류 발생 가능성 있음
-              console.warn("Error disconnecting source node (might already be disconnected):", disconnectError);
+        
+        // 활성 소스 노드 목록에 추가
+        activeSourceNodes.current.push(sourceNode);
+        
+        // 재생 완료 시 처리 로직 추가
+        sourceNode.onended = () => {
+          console.log('오디오 청크 재생 완료 (Manually created buffer)');
+          
+          // 배열에서 해당 노드 제거
+          const index = activeSourceNodes.current.indexOf(sourceNode);
+          if (index > -1) {
+            activeSourceNodes.current.splice(index, 1);
           }
+          
+          // Promise 해결
           resolve();
         };
-
-        source.start(0); // 즉시 재생
-
+        
+        // 재생 시작
+        sourceNode.start();
+        console.log(`오디오 청크 재생 시작 (Manually created buffer, ${numberOfSamples} samples)`);
+        
+        // 오디오 재생 중임을 설정
+        if (processingAudio) {
+          processingAudio();
+        }
       } catch (error) {
-        console.error('오디오 재생 함수 내 오류 발생:', error);
+        console.error('오디오 처리 중 오류:', error);
         reject(error);
       }
     });
@@ -431,20 +463,10 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
              try {
                 const data = JSON.parse(event.data) as WebSocketResponse;
 
-                // --- 인터럽션 처리 로직을 여기로 이동 ---
-                if (data.control === 'interruption' && data.status === 'detected') {
-                  console.log('인터럽션 감지됨, 오디오 재생 중단');
-
-                  // 오디오 큐 비우기
-                  audioQueueRef.current = [];
-
-                  // 재생 중인 오디오 중단 로직
-                  isPlayingRef.current = false;
-                  setIsPlayingAudio(false);
-                  clearAudio();
-
-                  // 마이크 즉시 활성화
-                  enableMicrophone("말씀하세요...");
+                // --- 인터럽션 처리 로직 ---
+                if (data.control === 'interruption') {
+                  handleInterruption();
+                  return;
                 }
                 // --- 인터럽션 처리 로직 끝 ---
 
@@ -678,8 +700,18 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
   // 추가: 컴포넌트 언마운트 시 정리
   useEffect(() => {
     return () => {
-      // 컴포넌트 언마운트 시 플래그 초기화
+      // 컴포넌트 언마운트 시 정리
       pendingMicEnableRef.current = false;
+      
+      // 모든 활성 소스 노드 정리
+      activeSourceNodes.current.forEach(node => {
+        try {
+          node.stop();
+        } catch {
+          // 이미 중지된 노드는 무시
+        }
+      });
+      activeSourceNodes.current = [];
     };
   }, []);
 
