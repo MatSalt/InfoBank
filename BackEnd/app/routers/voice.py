@@ -8,6 +8,7 @@ from starlette.websockets import WebSocketState
 from app.services.stt_service import handle_stt_stream, STTTimeoutError
 from app.services.llm_service import stream_llm_response, clear_user_session # clear_user_session 함수 추가
 from app.services.tts_service import synthesize_speech_stream # 업데이트된 TTS 서비스 임포트
+from app.services.llm_emotion_service import analyze_emotion  # 감정 분석 서비스 추가
 from google.api_core import exceptions as google_exceptions
 # google.generativeai.errors 임포트 오류 수정
 # 대신 google.api_core.exceptions를 사용하여 429 오류를 처리
@@ -189,6 +190,39 @@ async def websocket_endpoint(websocket: WebSocket):
                 except Exception as send_err:
                     logger.error(f"[{client_id}] 오류 후 마이크 활성화 메시지 전송 중 추가 오류: {send_err}")
 
+    # --- 감정 분석 및 결과 전송 함수 (신규 추가) ---
+    async def handle_emotion_analysis(transcript: str, ws: WebSocket, client_id: str):
+        """사용자 발화의 감정을 분석하고 결과를 WebSocket으로 전송"""
+        try:
+            # 감정 분석 실행
+            emotion_result = await analyze_emotion(transcript, client_id)
+            
+            if emotion_result and "emotion" in emotion_result:
+                logger.info(f"[{client_id}] 감정 분석 결과: {emotion_result['emotion']}")
+                
+                # 감정 분석 결과를 WebSocket으로 전송
+                if ws.client_state == WebSocketState.CONNECTED:
+                    await ws.send_json({
+                        "type": "emotion_result",
+                        "emotion": emotion_result["emotion"]
+                    })
+                    logger.debug(f"[{client_id}] 감정 분석 결과 전송 완료")
+            else:
+                logger.warning(f"[{client_id}] 감정 분석 결과가 없거나 형식이 잘못됨: {emotion_result}")
+                
+        except Exception as e:
+            logger.error(f"[{client_id}] 감정 분석 처리 중 오류: {e}", exc_info=True)
+            # 오류 시 기본 감정 전송
+            if ws.client_state == WebSocketState.CONNECTED:
+                try:
+                    await ws.send_json({
+                        "type": "emotion_result",
+                        "emotion": "중립",
+                        "error": str(e)
+                    })
+                except Exception as send_err:
+                    logger.error(f"[{client_id}] 감정 오류 메시지 전송 중 추가 오류: {send_err}")
+
     # --- STT 결과 처리 콜백 ---
     async def process_stt_result(transcript: str, is_final: bool, speech_event=None):
         """STT 결과 또는 음성 활동 이벤트를 처리합니다."""
@@ -250,11 +284,14 @@ async def websocket_endpoint(websocket: WebSocket):
         llm_tts_tasks.clear()  # 모든 태스크 제거
         
         # 새 LLM/TTS 태스크 시작
-        task = asyncio.create_task(handle_llm_and_tts(transcript, websocket, client_info))
-        llm_tts_tasks.add(task)
+        dialog_task = asyncio.create_task(handle_llm_and_tts(transcript, websocket, client_info))
+        llm_tts_tasks.add(dialog_task)
+        dialog_task.add_done_callback(lambda t: llm_tts_tasks.discard(t))
         
-        # 태스크 완료 시 집합에서 제거
-        task.add_done_callback(lambda t: llm_tts_tasks.discard(t))
+        # 감정 분석 태스크 시작 (추가)
+        emotion_task = asyncio.create_task(handle_emotion_analysis(transcript, websocket, client_info))
+        llm_tts_tasks.add(emotion_task)
+        emotion_task.add_done_callback(lambda t: llm_tts_tasks.discard(t))
 
     # --- 인터럽션 처리 함수 ---
     async def handle_interruption():
