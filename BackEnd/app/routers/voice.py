@@ -338,16 +338,28 @@ async def websocket_endpoint(websocket: WebSocket):
         while is_connected:
             try:
                 # 타임아웃 설정으로 무한 대기 방지
-                data = await asyncio.wait_for(websocket.receive_bytes(), timeout=30.0)
+                message = await asyncio.wait_for(websocket.receive(), timeout=30.0)
                 
                 # 연결 상태 확인
                 if not is_connected or websocket.client_state != WebSocketState.CONNECTED:
                     logger.warning(f"[{client_info}] 연결이 끊어진 상태에서 데이터 수신. 루프 종료.")
                     break
                 
-                # 오디오 데이터를 큐에 추가
-                await audio_queue.put(data)
-                logger.debug(f"[{client_info}] 오디오 데이터 수신 및 큐에 추가됨 ({len(data)} bytes)")
+                # 메시지 타입에 따라 처리
+                if "bytes" in message:
+                    # 바이너리 데이터 처리 (오디오)
+                    data = message["bytes"]
+                    await audio_queue.put(data)
+                    logger.debug(f"[{client_info}] 오디오 데이터 수신 및 큐에 추가됨 ({len(data)} bytes)")
+                elif "text" in message:
+                    # 텍스트 메시지 처리
+                    text_data = message["text"]
+                    logger.debug(f"[{client_info}] 텍스트 메시지 수신: {text_data}")
+                    # 필요시 텍스트 메시지 처리 코드 추가
+                    # 예: JSON 명령어 처리 등
+                else:
+                    # 알 수 없는 메시지 형식
+                    logger.warning(f"[{client_info}] 알 수 없는 메시지 형식: {message}")
                 
             except asyncio.TimeoutError:
                 # 타임아웃은 정상적인 상황, 연결 상태 확인만
@@ -362,7 +374,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 break
                 
             except Exception as e:
-                logger.error(f"[{client_info}] 메시지 수신 중 오류: {e}", exc_info=True)
+                logger.error(f"[{client_info}] 메시지 수신 중 오류: {type(e).__name__}: {e}", exc_info=True)
                 if isinstance(e, (ConnectionResetError, BrokenPipeError)):
                     is_connected = False
                     break
@@ -385,8 +397,9 @@ async def websocket_endpoint(websocket: WebSocket):
             except Exception as e:
                 logger.warning(f"[{client_info}] STT 태스크 취소 중 오류: {e}")
         
-        # LLM/TTS 태스크 취소
-        for task in llm_tts_tasks:
+        # LLM/TTS 태스크 취소 (세트의 복사본을 순회)
+        tasks_to_cancel = list(llm_tts_tasks)  # 세트를 리스트로 복사
+        for task in tasks_to_cancel:
             if not task.done():
                 task.cancel()
                 try:
@@ -395,6 +408,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     pass
                 except Exception as e:
                     logger.warning(f"[{client_info}] LLM/TTS 태스크 취소 중 오류: {e}")
+        
+        llm_tts_tasks.clear()  # 모든 태스크 제거
         
         # 오디오 큐 정리
         while not audio_queue.empty():
