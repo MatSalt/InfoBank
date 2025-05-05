@@ -47,11 +47,6 @@
 			"Blend": "Add"
 		},
 		{
-			"Id": "ParamMouthForm",
-			"Value": -1.76,
-			"Blend": "Add"
-		},
-		{
 			"Id": "ParamEyeForm",
 			"Value": 1,
 			"Blend": "Add"

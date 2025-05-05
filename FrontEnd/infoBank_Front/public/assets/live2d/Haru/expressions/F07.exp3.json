@@ -52,11 +52,6 @@
 			"Blend": "Add"
 		},
 		{
-			"Id": "ParamMouthForm",
-			"Value": -0.46,
-			"Blend": "Add"
-		},
-		{
 			"Id": "ParamTere",
 			"Value": 1,
 			"Blend": "Add"
