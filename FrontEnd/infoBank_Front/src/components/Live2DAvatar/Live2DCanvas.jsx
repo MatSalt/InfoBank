@@ -73,27 +73,20 @@ const Live2DCanvas = ({ modelPath, emotion = "중립" }) => {
         const expressionManager = modelRef.current.internalModel.motionManager?.expressionManager;
         
         if (expressionManager) {
-          const expressions = expressionManager.definitions.map(def => def.name);
-          console.log('[Live2DCanvas] 사용 가능한 표정 목록:', expressions);
-          
-          // 표정 직접 적용 (성공하는 방법 2 사용)
+          // 표정 직접 적용
           try {
-            // expressionManager.setExpression 직접 호출 (2차 방법이 성공함)
+            // expressionManager.setExpression 직접 호출
             expressionManager.setExpression(expressionName);
-            console.log(`[Live2DCanvas] 표정 적용 성공: ${expressionName}`);
             setCurrentExpression(expressionName);
           } catch (expError) {
             console.error('[Live2DCanvas] 표정 적용 실패:', expError);
             
-            // 실패 시 인덱스 기반 시도
+            // 실패 시 첫 번째 표정 시도
             try {
-              if (expressions.length > 0) {
-                expressionManager.setExpression(0);
-                console.log(`[Live2DCanvas] 표정 적용 대체 성공 (첫번째 표정)`);
-                setCurrentExpression(expressions[0] || expressionName);
-              }
+              expressionManager.setExpression(0);
+              setCurrentExpression(expressionName);
             } catch (expError2) {
-              console.error('[Live2DCanvas] 모든 표정 적용 방법 실패:', expError2);
+              console.error('[Live2DCanvas] 표정 적용 재시도 실패:', expError2);
             }
           }
         } else {
@@ -304,16 +297,10 @@ const Live2DCanvas = ({ modelPath, emotion = "중립" }) => {
           console.log('- motionManager 존재:', !!model.internalModel?.motionManager);
           console.log('- expressionManager 존재:', !!model.internalModel?.motionManager?.expressionManager);
           
-          // 표정 관련 속성 확인
-          if (model.internalModel) {
-            console.log('- model.expressions:', model.expressions);
-            console.log('- model.internalModel.expressions:', model.internalModel.expressions);
-            
-            // 모든 가능한 경로 시도
-            if (model.internalModel.motionManager?.expressionManager) {
-              console.log('- expressionManager.expressions:', model.internalModel.motionManager.expressionManager.expressions);
-              console.log('- expressionManager.definitions:', model.internalModel.motionManager.expressionManager.definitions);
-            }
+          // 표정 관련 속성 확인 - 간소화
+          if (model.internalModel?.motionManager?.expressionManager) {
+            // 디버깅 목적으로만 확인 (로깅 없음)
+            const hasExpressions = model.internalModel.motionManager.expressionManager.definitions.length > 0;
           }
         } catch (e) {
           console.warn('[Debug] 모델 디버깅 정보 출력 중 오류:', e);
@@ -334,31 +321,16 @@ const Live2DCanvas = ({ modelPath, emotion = "중립" }) => {
           console.warn('Idle 모션 비활성화 오류:', e);
         }
 
-        // 표정 목록 확인 (수정된 부분)
+        // 표정 관련 로깅 간소화
         try {
           if (model.internalModel.motionManager?.expressionManager) {
-            const expressions = model.internalModel.motionManager.expressionManager.definitions.map(def => def.name);
-            console.log('[Live2DCanvas] 모델 로드 후 사용 가능한 표정:', expressions);
-            
             // 기본 표정 설정
-            if (expressions.length > 0) {
-              // 현재 감정에 해당하는 표정 찾기
-              const expressionName = EMOTION_TO_EXPRESSION[currentEmotionRef.current] || expressions[0];
-              
-              // 해당 표정이 있으면 적용, 없으면 첫 번째 표정 적용
-              if (expressions.includes(expressionName)) {
-                model.expression(expressionName);
-                setCurrentExpression(expressionName);
-              } else {
-                model.expression(expressions[0]);
-                setCurrentExpression(expressions[0]);
-              }
-            }
+            updateExpression(currentEmotionRef.current);
           } else {
             console.warn('[Live2DCanvas] 모델에 expressionManager가 없습니다.');
           }
         } catch (e) {
-          console.error('[Live2DCanvas] 표정 목록 확인 오류:', e);
+          console.error('[Live2DCanvas] 표정 설정 오류:', e);
         }
 
       } catch (e) {
