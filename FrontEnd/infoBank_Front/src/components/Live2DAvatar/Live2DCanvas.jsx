@@ -7,23 +7,36 @@ import { useAudio } from '../../contexts/AudioContext';
 // PIXI를 전역 window에 노출시켜 Live2D 모델이 자동 업데이트되도록 함
 window.PIXI = PIXI;
 
-const Live2DCanvas = ({ modelPath }) => {
+// 감정에 따른 표정 매핑
+const EMOTION_TO_EXPRESSION = {
+  "기쁨": "F01",      // 기쁨, 행복
+  "화남": "F02",      // 화남, 짜증
+  "속상함": "F03",    // 속상함, 슬픔
+  "놀라움": "F04",    // 놀라움
+  "부끄러움": "F05",  // 부끄러움
+  "행복": "F01",      // 기쁨과 동일
+  "짜증": "F02",      // 화남과 동일
+  "슬픔": "F03",      // 속상함과 동일
+  "싫증": "F06",      // 싫증 전용
+  "귀찮음": "F06",    // 싫증과 동일
+  "중립": "F08"       // 기본 표정(F08로 설정)
+};
+
+const Live2DCanvas = ({ modelPath, emotion = "중립" }) => {
   const containerRef = useRef(null);
   const pixiAppRef = useRef(null);
   const modelRef = useRef(null);
   const animationFrameRef = useRef(null);
-  // const audioProcessorRef = useRef(null); // 제거
   const dataArrayRef = useRef(null); // AnalyserNode 데이터 배열 ref
   const currentLipSyncValueRef = useRef(0); // 스무딩된 값 저장용 ref
   const currentMouthFormValueRef = useRef(1); // ParamMouthForm 스무딩 값 저장용 ref (초기값 1)
-  // const [lipSyncEnabled, setLipSyncEnabled] = useState(false); // isAudioPlaying으로 대체
-  // const [lipSyncParams, setLipSyncParams] = useState(null); // 모델 로드 시 직접 설정
+  const currentEmotionRef = useRef("중립"); // 현재 적용된 감정 상태 ref
+  
+  // 현재 표정 이름 상태 추가
+  const [currentExpression, setCurrentExpression] = useState("F08");
 
   // isAudioPlaying과 analyserNode를 컨텍스트에서 가져옴
   const { isAudioPlaying, analyserNode } = useAudio();
-
-  // 오디오 프로세서 초기화 제거
-  // useEffect(() => { ... }, []);
 
   // AnalyserNode 준비 시 데이터 배열 생성
   useEffect(() => {
@@ -35,8 +48,64 @@ const Live2DCanvas = ({ modelPath }) => {
     }
   }, [analyserNode]); // analyserNode가 변경될 때 실행
 
-  // 오디오 데이터 및 재생 상태 변경 처리 useEffect 제거 (updateLipSync에서 직접 처리)
-  // useEffect(() => { ... }, [audioData, isAudioPlaying, lipSyncEnabled]);
+  // 감정 변경 감지 및 표정 업데이트
+  useEffect(() => {
+    if (emotion !== currentEmotionRef.current) {
+      currentEmotionRef.current = emotion;
+      updateExpression(emotion);
+    }
+  }, [emotion]);
+
+  // 표정 업데이트 함수
+  const updateExpression = useCallback((emotion) => {
+    if (!modelRef.current) return;
+    
+    // 감정에 해당하는 표정 이름 가져오기
+    const expressionName = EMOTION_TO_EXPRESSION[emotion] || "F08";
+    
+    try {
+      // 모델에 표정 적용
+      if (modelRef.current.internalModel) {
+        // 표정 적용 시도
+        console.log(`[Live2DCanvas] 표정 변경: ${emotion} -> ${expressionName}`);
+        
+        // expressionManager 확인
+        const expressionManager = modelRef.current.internalModel.motionManager?.expressionManager;
+        
+        if (expressionManager) {
+          const expressions = expressionManager.definitions.map(def => def.name);
+          console.log('[Live2DCanvas] 사용 가능한 표정 목록:', expressions);
+          
+          // 표정 직접 적용 (성공하는 방법 2 사용)
+          try {
+            // expressionManager.setExpression 직접 호출 (2차 방법이 성공함)
+            expressionManager.setExpression(expressionName);
+            console.log(`[Live2DCanvas] 표정 적용 성공: ${expressionName}`);
+            setCurrentExpression(expressionName);
+          } catch (expError) {
+            console.error('[Live2DCanvas] 표정 적용 실패:', expError);
+            
+            // 실패 시 인덱스 기반 시도
+            try {
+              if (expressions.length > 0) {
+                expressionManager.setExpression(0);
+                console.log(`[Live2DCanvas] 표정 적용 대체 성공 (첫번째 표정)`);
+                setCurrentExpression(expressions[0] || expressionName);
+              }
+            } catch (expError2) {
+              console.error('[Live2DCanvas] 모든 표정 적용 방법 실패:', expError2);
+            }
+          }
+        } else {
+          console.warn('[Live2DCanvas] 모델의 expressionManager가 초기화되지 않았습니다.');
+        }
+      } else {
+        console.warn('[Live2DCanvas] 모델이 초기화되지 않았습니다.');
+      }
+    } catch (error) {
+      console.error('[Live2DCanvas] 표정 업데이트 오류:', error);
+    }
+  }, []);
 
   // 립싱크 파라미터 업데이트 함수 수정
   const updateLipSync = useCallback(() => {
@@ -212,6 +281,12 @@ const Live2DCanvas = ({ modelPath }) => {
         if (pixiAppRef.current && pixiAppRef.current.stage) {
             pixiAppRef.current.stage.addChild(model);
             modelRef.current = model;
+            
+            // 모델이 로드된 후 사용 가능한 표정 로깅
+            console.log('[Live2DCanvas] 모델 로드 후 사용 가능한 표정:', Object.keys(model.internalModel.expressions || {}));
+            
+            // 초기 감정 적용
+            updateExpression(currentEmotionRef.current);
         } else {
             console.error("Cannot add model to stage, Pixi App or stage not available.");
             model.destroy(); // 생성된 모델 정리
@@ -219,9 +294,72 @@ const Live2DCanvas = ({ modelPath }) => {
             return;
         }
 
+        // 모델 로드 직후 디버깅 정보 추가
+        console.log('모델 크기:', model.width, model.height);
+        
+        // 모델 객체 구조 살펴보기 (디버깅)
+        try {
+          console.log('[Debug] 모델 객체 정보:');
+          console.log('- internalModel 존재:', !!model.internalModel);
+          console.log('- motionManager 존재:', !!model.internalModel?.motionManager);
+          console.log('- expressionManager 존재:', !!model.internalModel?.motionManager?.expressionManager);
+          
+          // 표정 관련 속성 확인
+          if (model.internalModel) {
+            console.log('- model.expressions:', model.expressions);
+            console.log('- model.internalModel.expressions:', model.internalModel.expressions);
+            
+            // 모든 가능한 경로 시도
+            if (model.internalModel.motionManager?.expressionManager) {
+              console.log('- expressionManager.expressions:', model.internalModel.motionManager.expressionManager.expressions);
+              console.log('- expressionManager.definitions:', model.internalModel.motionManager.expressionManager.definitions);
+            }
+          }
+        } catch (e) {
+          console.warn('[Debug] 모델 디버깅 정보 출력 중 오류:', e);
+        }
+
         // 모델 로드 성공 후 립싱크 파라미터 직접 설정
         const haruLipSyncParams = ['ParamMouthOpenY'];
         console.log('[LipSync] 사용할 파라미터:', haruLipSyncParams);
+
+        // 모델 크기 로그 (기존 코드)
+        console.log('모델 크기:', model.width, model.height);
+
+        // 기본 애니메이션 비활성화 (Idle 모션 그룹)
+        try {
+          console.log('[Debug] Disabling Idle motion group.');
+          model.internalModel.motionManager.stopAllMotions();
+        } catch (e) {
+          console.warn('Idle 모션 비활성화 오류:', e);
+        }
+
+        // 표정 목록 확인 (수정된 부분)
+        try {
+          if (model.internalModel.motionManager?.expressionManager) {
+            const expressions = model.internalModel.motionManager.expressionManager.definitions.map(def => def.name);
+            console.log('[Live2DCanvas] 모델 로드 후 사용 가능한 표정:', expressions);
+            
+            // 기본 표정 설정
+            if (expressions.length > 0) {
+              // 현재 감정에 해당하는 표정 찾기
+              const expressionName = EMOTION_TO_EXPRESSION[currentEmotionRef.current] || expressions[0];
+              
+              // 해당 표정이 있으면 적용, 없으면 첫 번째 표정 적용
+              if (expressions.includes(expressionName)) {
+                model.expression(expressionName);
+                setCurrentExpression(expressionName);
+              } else {
+                model.expression(expressions[0]);
+                setCurrentExpression(expressions[0]);
+              }
+            }
+          } else {
+            console.warn('[Live2DCanvas] 모델에 expressionManager가 없습니다.');
+          }
+        } catch (e) {
+          console.error('[Live2DCanvas] 표정 목록 확인 오류:', e);
+        }
 
       } catch (e) {
         console.error('Live2D 모델 로드 중 오류 발생:', e);
@@ -274,7 +412,7 @@ const Live2DCanvas = ({ modelPath }) => {
         pixiAppRef.current = null;
       }
     };
-  }, [modelPath]);
+  }, [modelPath, updateExpression]); // updateExpression 의존성 추가
 
   // 애니메이션 루프 관리 useEffect (변경 없음)
   useEffect(() => {

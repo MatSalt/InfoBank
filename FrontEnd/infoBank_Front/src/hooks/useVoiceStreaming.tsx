@@ -22,6 +22,8 @@ interface WebSocketResponse {
   reason?: string;
   message?: string;
   status?: string;
+  type?: string;      // 메시지 타입 (추가)
+  emotion?: string;   // 감정 분석 결과 (추가)
 }
 
 // 커스텀 훅의 반환 타입 인터페이스
@@ -39,6 +41,7 @@ interface UseVoiceStreamingReturn {
   processingTime: number | null;
   isPlayingAudio: boolean;
   lastAudioData: Float32Array | null;
+  currentEmotion: string; // 현재 감정 상태 (추가)
 }
 
 // 전역 Window 인터페이스 확장
@@ -76,6 +79,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
   const [processingTime, setProcessingTime] = useState<number | null>(null);
   const [isPlayingAudio, setIsPlayingAudio] = useState<boolean>(false);
   const [lastAudioData, setLastAudioData] = useState<Float32Array | null>(null);
+  const [currentEmotion, setCurrentEmotion] = useState<string>("중립"); // 감정 상태 추가
 
   // useRef (타입 명시, 초기값 null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -463,6 +467,12 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
              try {
                 const data = JSON.parse(event.data) as WebSocketResponse;
 
+                // 감정 분석 결과 처리 (추가)
+                if (data.type === "emotion_result" && data.emotion) {
+                  console.log(`[useVoiceStreaming] 감정 분석 결과 수신: ${data.emotion}`);
+                  setCurrentEmotion(data.emotion);
+                }
+
                 // --- 인터럽션 처리 로직 ---
                 if (data.control === 'interruption') {
                   handleInterruption();
@@ -730,5 +740,6 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
     processingTime,
     isPlayingAudio,
     lastAudioData,
+    currentEmotion, // 감정 상태 반환 추가
   };
 }

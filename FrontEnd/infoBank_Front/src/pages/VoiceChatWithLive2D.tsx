@@ -3,6 +3,21 @@ import { useVoiceStreaming } from '../hooks/useVoiceStreaming';
 import Live2DAvatar from '../components/Live2DAvatar';
 import { AudioProvider } from '../contexts/AudioContext';
 
+// 감정 이모지 매핑
+const EMOTION_EMOJI = {
+  "기쁨": "😊",
+  "화남": "😠",
+  "짜증": "😒",
+  "속상함": "😢",
+  "슬픔": "😥",
+  "행복": "😄",
+  "놀라움": "😲",
+  "부끄러움": "😳",
+  "싫증": "😑",
+  "귀찮음": "😩",
+  "중립": "😐"
+};
+
 const VoiceChatWithLive2D: React.FC = () => {
   // 커스텀 훅 사용
   const {
@@ -18,14 +33,18 @@ const VoiceChatWithLive2D: React.FC = () => {
     micStatusMessage,
     processingTime,
     lastAudioData,
+    currentEmotion, // 감정 상태 추가
   } = useVoiceStreaming();
+
+  // 현재 감정에 해당하는 이모지 가져오기
+  const emotionEmoji = EMOTION_EMOJI[currentEmotion] || EMOTION_EMOJI["중립"];
 
   return (
     <div className="flex flex-col md:flex-row w-full min-h-screen bg-gradient-to-br from-purple-100 to-blue-100">
       {/* Live2D 아바타 섹션 */}
       <div className="w-full md:w-1/2 h-[50vh] md:h-screen flex items-center justify-center p-4 relative">
         <div className="w-full h-full max-w-xl max-h-xl bg-white/50 rounded-xl shadow-lg overflow-hidden">
-          <Live2DAvatar audioData={lastAudioData} />
+          <Live2DAvatar audioData={lastAudioData} emotion={currentEmotion} />
           
           {/* 상태 오버레이 */}
           {isMicDisabled && (
@@ -38,6 +57,12 @@ const VoiceChatWithLive2D: React.FC = () => {
               녹음 중...
             </div>
           )}
+          
+          {/* 감정 상태 표시 */}
+          <div className="absolute bottom-4 left-4 bg-white/80 text-gray-800 px-4 py-2 rounded-lg text-sm font-medium shadow-md">
+            <span className="text-xl mr-2">{emotionEmoji}</span>
+            <span>{currentEmotion}</span>
+          </div>
         </div>
       </div>
 
@@ -78,6 +103,13 @@ const VoiceChatWithLive2D: React.FC = () => {
           <p className={`text-center font-medium mb-4 ${isMicDisabled ? 'text-red-600' : isRecording ? 'text-green-600' : 'text-gray-600'}`}>
             {isMicDisabled ? micStatusMessage : statusMessage}
           </p>
+          
+          {/* 현재 감정 상태 표시 */}
+          <div className="mb-4 p-3 bg-blue-50 rounded-lg text-center">
+            <p className="text-blue-700 text-sm font-medium">
+              감정 상태: {emotionEmoji} {currentEmotion}
+            </p>
+          </div>
           
           {/* 지원 오류 메시지 */}
           {!isSupported && (
