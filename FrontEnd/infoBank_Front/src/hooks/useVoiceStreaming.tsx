@@ -276,6 +276,8 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
     audioQueueRef.current = [];
     
     clearAudio();
+    setCurrentEmotion("중립"); // 인터럽션 발생 시에도 감정을 중립으로 재설정
+    console.log('인터럽션 처리 완료, 감정 상태를 "중립"으로 재설정합니다.');
   }, [clearAudio]);
 
   // 오디오 재생 함수 수정
@@ -413,7 +415,8 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
             isPlayingRef.current = false;
             setIsPlayingAudio(false); // UI 상태 업데이트: 재생 중지 (오류)
             clearAudio(); // 오류 시에도 상태 초기화
-            console.log("오디오 큐 처리 중 오류로 인해 중단 및 clearAudio 호출됨.");
+            setCurrentEmotion("중립"); // 오디오 재생 완료 후 감정을 중립으로 되돌림
+            console.log("오디오 큐 처리 중 오류로 인해 중단 및 clearAudio 호출됨. 감정 상태를 '중립'으로 재설정합니다.");
             return; // 함수 종료
         }
       }
@@ -423,7 +426,8 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
     isPlayingRef.current = false;
     setIsPlayingAudio(false); // UI 상태 업데이트: 재생 중지 (완료)
     clearAudio(); // 모든 오디오 재생 완료 후 상태 초기화
-    console.log("오디오 큐 처리 완료 및 clearAudio 호출됨.");
+    setCurrentEmotion("중립"); // 오디오 재생 완료 후 감정을 중립으로 되돌림
+    console.log("오디오 큐 처리 완료 및 clearAudio 호출됨. 감정 상태를 '중립'으로 재설정합니다.");
 
     if (pendingMicEnableRef.current) {
       console.log("모든 오디오 재생 완료 후 마이크 활성화 실행");
