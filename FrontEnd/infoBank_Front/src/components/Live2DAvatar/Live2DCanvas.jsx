@@ -275,9 +275,6 @@ const Live2DCanvas = ({ modelPath, emotion = "중립" }) => {
             pixiAppRef.current.stage.addChild(model);
             modelRef.current = model;
             
-            // 모델이 로드된 후 사용 가능한 표정 로깅
-            console.log('[Live2DCanvas] 모델 로드 후 사용 가능한 표정:', Object.keys(model.internalModel.expressions || {}));
-            
             // 초기 감정 적용
             updateExpression(currentEmotionRef.current);
         } else {
