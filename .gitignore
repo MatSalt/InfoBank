@@ -55,6 +55,7 @@ var/
 *.egg-info/
 .installed.cfg
 *.egg
+rag_gemini_original_app.py
 
 # 특정 경로의 __pycache__
 BackEnd/app/routers/__pycache__/
