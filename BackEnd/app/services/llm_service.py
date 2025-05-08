@@ -25,10 +25,8 @@ async def stream_llm_response(
     new_session: bool = False
 ) -> AsyncIterator[str]:
     """
-    주어진 텍스트를 Vertex AI Gemini LLM 채팅 세션에 보내고,
-    응답 텍스트 청크를 비동기적으로 생성(yield)하며 터미널에도 출력합니다.
-    
-    RAG 처리 통합: 42서울 관련 키워드가 있으면 RAG 파이프라인을 사용합니다.
+    주어진 텍스트를 LLM에 전송하고 응답을 스트리밍합니다.
+    RAG 서비스를 기본으로 사용하며, 오류 시 기본 에러 메시지를 반환합니다.
 
     Args:
         text: LLM에 전달할 사용자 입력 텍스트 (STT 결과).
@@ -45,80 +43,31 @@ async def stream_llm_response(
     
     logger.info(f"[{client_info}] LLM 요청 시작: '{text[:50]}...'")
     
-    # RAG 서비스를 통한 처리
+    # 새 세션 요청이면 기존 세션 초기화
+    if new_session:
+        chat_session_manager.clear_session(user_id)
+        logger.debug(f"[{client_info}] 새 채팅 세션 시작 (사용자: {user_id})")
+    
     try:
         # RAG 서비스 초기화 (아직 안 했다면)
         if not rag_service.initialized:
             rag_service.initialize()
         
         # RAG 서비스를 통한 처리
-        print(f"\n--- [{client_info}] LLM 응답 (RAG 사용) 시작 ---", flush=True) # 터미널 출력 시작 표시
+        print(f"\n--- [{client_info}] LLM 응답 시작 ---", flush=True)
         
         async for text_chunk in rag_service.process_query(text, client_info):
             # 터미널에 즉시 출력 (디버깅용)
             print(text_chunk, end="", flush=True)
             yield text_chunk
             
-        print(f"\n--- [{client_info}] LLM 응답 (RAG 사용) 종료 ---", flush=True)
-        return
+        print(f"\n--- [{client_info}] LLM 응답 종료 ---", flush=True)
         
     except Exception as e:
-        logger.error(f"[{client_info}] RAG 서비스 처리 중 오류 발생: {e}", exc_info=True)
-        logger.info(f"[{client_info}] RAG 오류로 인해 기본 LLM 서비스로 폴백")
-        print(f"\n--- [{client_info}] RAG 처리 오류, 기본 LLM으로 폴백 ---", flush=True)
-        # 오류 발생 시 기본 LLM 호출로 폴백
-    
-    # 새 세션 요청이면 기존 세션 초기화
-    if new_session:
-        chat_session_manager.clear_session(user_id)
-        logger.debug(f"[{client_info}] 새 채팅 세션 시작 (사용자: {user_id})")
-    
-    # 채팅 세션 가져오기
-    chat_session = chat_session_manager.get_session(user_id)
-    
-    try:
-        # 스트리밍 응답 생성 요청 (동기 함수를 별도 스레드에서 실행)
-        def send_message_sync():
-            # 단순 텍스트만 전달
-            return chat_session.send_message_stream(text)
-
-        # 동기 스트림을 비동기적으로 처리하기 위한 래퍼
-        response_stream = await asyncio.to_thread(send_message_sync)
-
-        # 스트리밍 응답 처리 및 텍스트 청크 생성(yield) 및 터미널 출력
-        logger.info(f"[{client_info}] LLM 응답 스트리밍 시작...")
-        print(f"\n--- [{client_info}] LLM 응답 (터미널 출력) 시작 ---", flush=True) # 터미널 출력 시작 표시
-
-        chunk_count = 0
-        for chunk in response_stream: # 이 루프는 동기적으로 실행됨
-            if hasattr(chunk, 'text') and chunk.text:
-                text_chunk = chunk.text
-                logger.debug(f"[{client_info}] LLM 텍스트 청크 수신: '{text_chunk[:30]}...'")
-                # 터미널에 즉시 출력 (디버깅용)
-                print(text_chunk, end="", flush=True)
-                yield text_chunk # 텍스트 청크를 생성
-                chunk_count += 1
-                logger.debug(f"[{client_info}] LLM 텍스트 청크 생성(yield) 완료.")
-            else:
-                # 예상치 못한 청크 구조 로깅
-                # logger.debug(f"[{client_info}] Received chunk without text or empty text: {chunk}")
-                pass
-
-        print(f"\n--- [{client_info}] LLM 응답 (터미널 출력) 종료 ---", flush=True) # 터미널 출력 종료 표시
-        logger.info(f"[{client_info}] LLM 응답 스트리밍 완료. 총 {chunk_count}개 청크 생성됨.")
-
-    except AttributeError as e:
-        logger.error(f"[{client_info}] LLM 오류: 객체 속성 오류. Vertex AI 설정 시 'client.chats' 또는 'send_message_stream' 인터페이스가 지원되지 않을 수 있습니다. 오류: {e}", exc_info=True)
-        print(f"\n--- [{client_info}] LLM 오류 발생 (터미널): {e} ---", flush=True) # 오류도 터미널에 출력
-        raise
-    except asyncio.CancelledError:
-        logger.warning(f"[{client_info}] LLM 스트리밍 작업 취소됨 (Vertex AI - Chats Interface).")
-        print(f"\n--- [{client_info}] LLM 응답 취소됨 (터미널) ---", flush=True) # 취소도 터미널에 출력
-        raise
-    except Exception as e:
-        logger.error(f"[{client_info}] LLM 스트리밍 중 오류 발생 (Vertex AI - Chats Interface): {e}", exc_info=True)
-        print(f"\n--- [{client_info}] LLM 오류 발생 (터미널): {e} ---", flush=True) # 오류도 터미널에 출력
-        raise
+        logger.error(f"[{client_info}] LLM 처리 중 오류 발생: {e}", exc_info=True)
+        error_message = "죄송합니다. 요청을 처리하는 중에 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
+        print(f"\n--- [{client_info}] 오류 발생: {e} ---", flush=True)
+        yield error_message
     finally:
         logger.debug(f"[{client_info}] LLM 스트리밍 함수 종료.")
 
