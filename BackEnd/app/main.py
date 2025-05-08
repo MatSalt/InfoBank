@@ -8,6 +8,8 @@ from .core.config import settings
 import os
 # 라우터 임포트 (voice 라우터)
 from app.routers import voice
+# RAG 서비스 임포트
+from app.services.rag_service import rag_service
 
 # 로깅 설정
 logging.basicConfig(
@@ -32,6 +34,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 서버 시작 이벤트 핸들러
+@app.on_event("startup")
+async def startup_event():
+    """서버 시작 시 초기화 작업 수행"""
+    # 기존 초기화 로직이 있다면 여기에 추가
+    
+    # 벡터 저장소 로드
+    logger.info("서버 시작 시 벡터 저장소 로드 중...")
+    try:
+        rag_service.initialize()
+        logger.info("벡터 저장소 로드 완료 (2500개 문서)")
+    except Exception as e:
+        logger.error(f"벡터 저장소 초기 로드 중 오류 발생: {e}", exc_info=True)
 
 # 루트 경로 핸들러 (선택 사항)
 @app.get("/")
