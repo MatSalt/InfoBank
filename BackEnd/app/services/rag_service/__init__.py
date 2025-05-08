@@ -134,8 +134,8 @@ class RAGService:
             # RAG 프롬프트 생성
             prompt = create_rag_prompt(query, search_results)
             
-            # RAG 세션 사용
-            chat_session = chat_session_manager.get_session(f"{client_id}_rag")
+            # 동일한 채팅 세션 사용 (RAG와 일반 채팅 통합)
+            chat_session = chat_session_manager.get_session(client_id)
             
             # 스트리밍 응답 생성
             response_stream = await asyncio.to_thread(
