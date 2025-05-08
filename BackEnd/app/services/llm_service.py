@@ -8,79 +8,14 @@ from google.genai.types import HttpOptions # HttpOptions 임포트
 from ..core.config import settings # 설정 객체 직접 임포트
 from typing import AsyncIterator, Dict, Optional, Any # 타입 힌트 추가
 
+# 세션 관리자 임포트
+from .session_manager import chat_session_manager
+
+# RAG 서비스 임포트
+from .rag_service import rag_service
+
 # 로거 설정
 logger = logging.getLogger(__name__)
-
-# --- API 키 설정 제거 ---
-# API 키를 사용하지 않고 ADC (Application Default Credentials) 등 다른 인증 방식 사용 가정
-
-# --- 채팅 세션 관리 클래스 ---
-class ChatSessionManager:
-    """
-    사용자별 채팅 세션을 관리하는 클래스
-    """
-    def __init__(self):
-        """
-        채팅 세션 관리자 초기화
-        """
-        self.sessions: Dict[str, Any] = {}  # {user_id: chat_session}
-        self.client = None  # genai.Client 인스턴스
-    
-    def get_client(self) -> genai.Client:
-        """
-        genai.Client 인스턴스를 가져오거나 생성합니다.
-        
-        Returns:
-            genai.Client 인스턴스
-        """
-        if self.client is None:
-            self.client = genai.Client(
-                vertexai=True,
-                project=settings.GOOGLE_CLOUD_PROJECT_ID,
-                location=settings.VERTEX_AI_LOCATION,
-                http_options=HttpOptions(api_version="v1")
-            )
-            logger.debug(f"genai.Client 생성 완료 (Vertex AI: project={settings.GOOGLE_CLOUD_PROJECT_ID}, location={settings.VERTEX_AI_LOCATION}).")
-        return self.client
-    
-    def get_session(self, user_id: str) -> Any:
-        """
-        사용자의 채팅 세션을 가져오거나 생성합니다.
-        
-        Args:
-            user_id: 사용자 식별자
-            
-        Returns:
-            채팅 세션 객체
-        """
-        if user_id not in self.sessions:
-            client = self.get_client()
-            model_name = settings.GEMINI_MODEL
-            self.sessions[user_id] = client.chats.create(model=model_name)
-            logger.debug(f"새 채팅 세션 생성됨 (사용자: {user_id}, 모델: {model_name})")
-        
-        return self.sessions[user_id]
-    
-    def clear_session(self, user_id: str) -> None:
-        """
-        사용자의 채팅 세션을 초기화합니다.
-        
-        Args:
-            user_id: 사용자 식별자
-        """
-        if user_id in self.sessions:
-            del self.sessions[user_id]
-            logger.debug(f"채팅 세션 초기화됨 (사용자: {user_id})")
-    
-    def clear_all_sessions(self) -> None:
-        """
-        모든 채팅 세션을 초기화합니다.
-        """
-        self.sessions.clear()
-        logger.debug("모든 채팅 세션 초기화됨")
-
-# 전역 채팅 세션 관리자 인스턴스
-chat_session_manager = ChatSessionManager()
 
 # --- LLM 응답 스트리밍 함수 (비동기 제너레이터로 수정 + 터미널 출력 추가) ---
 async def stream_llm_response(
@@ -92,6 +27,8 @@ async def stream_llm_response(
     """
     주어진 텍스트를 Vertex AI Gemini LLM 채팅 세션에 보내고,
     응답 텍스트 청크를 비동기적으로 생성(yield)하며 터미널에도 출력합니다.
+    
+    RAG 처리 통합: 42서울 관련 키워드가 있으면 RAG 파이프라인을 사용합니다.
 
     Args:
         text: LLM에 전달할 사용자 입력 텍스트 (STT 결과).
@@ -106,7 +43,30 @@ async def stream_llm_response(
     if user_id is None:
         user_id = client_info
     
-    logger.info(f"[{client_info}] LLM 요청 시작 (Vertex AI - Chats Interface): '{text[:50]}...'")
+    logger.info(f"[{client_info}] LLM 요청 시작: '{text[:50]}...'")
+    
+    # RAG 서비스를 통한 처리
+    try:
+        # RAG 서비스 초기화 (아직 안 했다면)
+        if not rag_service.initialized:
+            rag_service.initialize()
+        
+        # RAG 서비스를 통한 처리
+        print(f"\n--- [{client_info}] LLM 응답 (RAG 사용) 시작 ---", flush=True) # 터미널 출력 시작 표시
+        
+        async for text_chunk in rag_service.process_query(text, client_info):
+            # 터미널에 즉시 출력 (디버깅용)
+            print(text_chunk, end="", flush=True)
+            yield text_chunk
+            
+        print(f"\n--- [{client_info}] LLM 응답 (RAG 사용) 종료 ---", flush=True)
+        return
+        
+    except Exception as e:
+        logger.error(f"[{client_info}] RAG 서비스 처리 중 오류 발생: {e}", exc_info=True)
+        logger.info(f"[{client_info}] RAG 오류로 인해 기본 LLM 서비스로 폴백")
+        print(f"\n--- [{client_info}] RAG 처리 오류, 기본 LLM으로 폴백 ---", flush=True)
+        # 오류 발생 시 기본 LLM 호출로 폴백
     
     # 시스템 지시문이 있는지 확인
     system_instruction = settings.SYSTEM_INSTRUCTION
