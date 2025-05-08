@@ -1,6 +1,7 @@
 # backend/app/services/stt_service.py
 import logging
 import asyncio
+import time
 from google.cloud import speech_v2 as speech
 from google.cloud.speech_v2.types import cloud_speech
 from google.api_core import exceptions as google_exceptions
@@ -19,6 +20,11 @@ RATE = settings.STT_SAMPLE_RATE
 LANGUAGE_CODES = settings.STT_LANGUAGE_CODES
 MODEL = settings.STT_MODEL
 RECOGNIZER_PATH = f"projects/{PROJECT_ID}/locations/global/recognizers/_"
+
+# --- 재연결 설정 ---
+MAX_RECONNECT_ATTEMPTS = 5  # 최대 재연결 시도 횟수
+BASE_BACKOFF_TIME = 1.0     # 초기 백오프 시간(초)
+MAX_BACKOFF_TIME = 10.0     # 최대 백오프 시간(초)
 
 # --- 비동기 STT 요청 생성기 ---
 async def request_generator(audio_queue: asyncio.Queue, recognizer: str, config: cloud_speech.StreamingRecognitionConfig):
@@ -161,3 +167,84 @@ async def handle_stt_stream(audio_queue: asyncio.Queue, result_callback: callabl
         raise
     finally:
         logger.info("STT 서비스: 스트리밍 처리 (한 세션) 완료.")
+
+# --- 자동 재연결을 지원하는 STT 스트리밍 처리 함수 ---
+async def start_stt_with_auto_reconnect(audio_queue: asyncio.Queue, result_callback: callable):
+    """
+    STT 스트리밍을 시작하고 타임아웃 발생 시 자동으로 재연결합니다.
+    audio_queue를 유지하면서 연결 상태 변경을 클라이언트에게 알립니다.
+    
+    Args:
+        audio_queue: 오디오 데이터를 포함하는 큐 (재연결 시에도 유지됨)
+        result_callback: 결과 처리를 위한 콜백 함수
+    """
+    reconnect_count = 0
+    backoff_time = BASE_BACKOFF_TIME
+    
+    while True:
+        try:
+            # STT 스트리밍 시작
+            await handle_stt_stream(audio_queue, result_callback)
+            
+            # 정상 종료된 경우 루프 종료
+            logger.info("STT 스트림이 정상적으로 종료되었습니다.")
+            break
+            
+        except STTTimeoutError:
+            # 5분 타임아웃 발생 시 재연결 시도
+            reconnect_count += 1
+            logger.warning(f"STT 타임아웃 감지, 재연결 시도 #{reconnect_count}/{MAX_RECONNECT_ATTEMPTS}")
+            
+            # 클라이언트에 재연결 상태 알림
+            await result_callback(None, False, speech_event={
+                "type": "STT_RECONNECTING",
+                "attempt": reconnect_count,
+                "max_attempts": MAX_RECONNECT_ATTEMPTS
+            })
+            
+            # 재연결 전 잠시 대기 (지수 백오프)
+            logger.info(f"재연결 전 {backoff_time:.1f}초 대기...")
+            await asyncio.sleep(backoff_time)
+            
+            # 백오프 시간 증가 (지수적으로)
+            backoff_time = min(backoff_time * 1.5, MAX_BACKOFF_TIME)
+            
+            # 최대 재시도 횟수 확인
+            if reconnect_count >= MAX_RECONNECT_ATTEMPTS:
+                logger.error(f"STT 재연결 최대 시도 횟수({MAX_RECONNECT_ATTEMPTS})를 초과했습니다.")
+                
+                # 클라이언트에 재연결 실패 알림
+                await result_callback(None, False, speech_event={
+                    "type": "STT_RECONNECTION_FAILED",
+                    "message": f"STT 서비스 재연결 실패 ({MAX_RECONNECT_ATTEMPTS}회 시도 후)"
+                })
+                
+                # 심각한 오류로 간주하고 예외 발생
+                raise RuntimeError(f"STT 서비스 재연결 실패 ({MAX_RECONNECT_ATTEMPTS}회 시도 후)")
+            
+            # 재연결 성공 시 백오프 시간 초기화
+            if reconnect_count > 0 and reconnect_count < MAX_RECONNECT_ATTEMPTS:
+                # 클라이언트에 재연결 성공 알림
+                await result_callback(None, False, speech_event={
+                    "type": "STT_RECONNECTED",
+                    "attempt": reconnect_count
+                })
+                logger.info(f"STT 서비스 재연결 성공 (시도 #{reconnect_count})")
+                
+        except asyncio.CancelledError:
+            # 외부에서 태스크가 취소된 경우
+            logger.info("STT 자동 재연결 태스크가 취소되었습니다.")
+            raise
+            
+        except Exception as e:
+            # 그 외 예외는 심각한 오류로 간주하고 재시도하지 않음
+            logger.error(f"STT 스트리밍 중 복구 불가능한 오류 발생: {e}", exc_info=True)
+            
+            # 클라이언트에 오류 알림
+            await result_callback(None, False, speech_event={
+                "type": "STT_ERROR",
+                "error": str(e)
+            })
+            
+            # 호출자에게 예외 전파
+            raise

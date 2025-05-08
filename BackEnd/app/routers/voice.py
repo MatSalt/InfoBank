@@ -5,7 +5,7 @@ import re # 정규식 임포트 (현재 로직에서는 필수는 아니지만 �
 import uuid # 사용자 ID 생성을 위한 UUID 모듈 추가
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
-from app.services.stt_service import handle_stt_stream, STTTimeoutError
+from app.services.stt_service import handle_stt_stream, start_stt_with_auto_reconnect, STTTimeoutError  # 자동 재연결 함수 추가
 from app.services.llm_service import stream_llm_response, clear_user_session # clear_user_session 함수 추가
 from app.services.tts_service import synthesize_speech_stream # 업데이트된 TTS 서비스 임포트
 from app.services.llm_emotion_service import analyze_emotion  # 감정 분석 서비스 추가
@@ -261,6 +261,71 @@ async def websocket_endpoint(websocket: WebSocket):
                     await handle_interruption()
                 return  # 인터럽션 처리 후 종료
             
+            # STT 재연결 관련 이벤트 처리 (새로 추가)
+            elif event_type == "STT_RECONNECTING":
+                logger.info(f"[{client_info}] STT 재연결 중: 시도 #{speech_event.get('attempt')}/{speech_event.get('max_attempts')}")
+                
+                # 클라이언트에 STT 재연결 중임을 알림
+                if is_connected and websocket.client_state == WebSocketState.CONNECTED:
+                    try:
+                        await websocket.send_json({
+                            "control": "stt_status",
+                            "status": "reconnecting",
+                            "attempt": speech_event.get('attempt', 1),
+                            "max_attempts": speech_event.get('max_attempts', 5)
+                        })
+                        logger.info(f"[{client_info}] STT 재연결 상태를 클라이언트에 전송함")
+                    except Exception as e:
+                        logger.error(f"[{client_info}] STT 재연결 알림 전송 중 오류: {e}")
+                return  # 이벤트 처리 후 종료
+            
+            elif event_type == "STT_RECONNECTED":
+                logger.info(f"[{client_info}] STT 재연결 성공: 시도 #{speech_event.get('attempt')}")
+                
+                # 클라이언트에 STT 재연결 성공을 알림
+                if is_connected and websocket.client_state == WebSocketState.CONNECTED:
+                    try:
+                        await websocket.send_json({
+                            "control": "stt_status",
+                            "status": "reconnected",
+                            "message": "음성 인식 서비스가 재연결되었습니다."
+                        })
+                    except Exception as e:
+                        logger.error(f"[{client_info}] STT 재연결 성공 알림 전송 중 오류: {e}")
+                return  # 이벤트 처리 후 종료
+            
+            elif event_type == "STT_RECONNECTION_FAILED":
+                logger.error(f"[{client_info}] STT 재연결 실패: {speech_event.get('message')}")
+                
+                # 클라이언트에 STT 재연결 실패를 알림
+                if is_connected and websocket.client_state == WebSocketState.CONNECTED:
+                    try:
+                        await websocket.send_json({
+                            "control": "stt_status",
+                            "status": "error",
+                            "message": "음성 인식 서비스 연결 실패. 잠시 후 다시 시도해주세요.",
+                            "error": speech_event.get('message', '최대 재시도 횟수 초과')
+                        })
+                    except Exception as e:
+                        logger.error(f"[{client_info}] STT 재연결 실패 알림 전송 중 오류: {e}")
+                return  # 이벤트 처리 후 종료
+            
+            elif event_type == "STT_ERROR":
+                logger.error(f"[{client_info}] STT 서비스 오류: {speech_event.get('error')}")
+                
+                # 클라이언트에 STT 오류를 알림
+                if is_connected and websocket.client_state == WebSocketState.CONNECTED:
+                    try:
+                        await websocket.send_json({
+                            "control": "stt_status",
+                            "status": "error",
+                            "message": "음성 인식 서비스 오류. 잠시 후 다시 시도해주세요.",
+                            "error": speech_event.get('error', '알 수 없는 오류')
+                        })
+                    except Exception as e:
+                        logger.error(f"[{client_info}] STT 오류 알림 전송 중 오류: {e}")
+                return  # 이벤트 처리 후 종료
+            
             return  # 이벤트 처리 후 종료
         
         # 기존 텍스트 처리 코드
@@ -331,8 +396,8 @@ async def websocket_endpoint(websocket: WebSocket):
 
     # --- 메인 루프: STT 관리 및 메시지 수신 ---
     try:
-        # STT 태스크 시작
-        stt_task = asyncio.create_task(handle_stt_stream(audio_queue, process_stt_result))
+        # STT 태스크 시작 (자동 재연결 기능 적용)
+        stt_task = asyncio.create_task(start_stt_with_auto_reconnect(audio_queue, process_stt_result))
         
         # 메시지 수신 루프
         while is_connected:
@@ -411,12 +476,8 @@ async def websocket_endpoint(websocket: WebSocket):
         
         llm_tts_tasks.clear()  # 모든 태스크 제거
         
-        # 오디오 큐 정리
-        while not audio_queue.empty():
-            try:
-                audio_queue.get_nowait()
-            except asyncio.QueueEmpty:
-                break
+        # 오디오 큐는 메모리 누수 방지를 위해 정리하지만, 데이터 자체는 삭제하지 않음
+        # 재연결 시 큐가 유지되므로 데이터 손실 없음
         
         # 사용자 채팅 세션 정리
         try:
