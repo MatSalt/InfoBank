@@ -129,7 +129,7 @@ class RAGService:
         
         try:
             # 벡터 검색 수행
-            search_results = await self.vector_store_manager.search(query, k=3)
+            search_results = await self.vector_store_manager.search(query, k=1)
             
             # RAG 프롬프트 생성
             prompt = create_rag_prompt(query, search_results)
