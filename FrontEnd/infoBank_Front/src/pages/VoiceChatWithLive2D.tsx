@@ -126,7 +126,7 @@ const VoiceChatWithLive2D: React.FC = () => {
                 : 'bg-purple-600 hover:bg-purple-700'
             } ${(!isSupported || isConnecting || isMicDisabled) ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
-            {isRecording ? '🔴 녹음 중지' : (isConnecting ? '연결 중...' : (isMicDisabled ? '처리 중...' : '🎤 대화 시작'))}
+            {isRecording ? '🔴 대화 중지' : (isConnecting ? '연결 중...' : (isMicDisabled ? '처리 중...' : '🎤 대화 시작'))}
           </button>
           
           {/* 인식된 텍스트 */}
