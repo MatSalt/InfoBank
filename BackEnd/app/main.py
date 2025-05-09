@@ -7,7 +7,7 @@ from .routers import api_router
 from .core.config import settings
 import os
 # 라우터 임포트 (voice 라우터)
-from app.routers import voice
+from app.routers import voice_chat_router as voice
 # RAG 서비스 임포트
 from app.services.rag_service import rag_service
 
