@@ -13,7 +13,7 @@ export interface WebSocketResponse {
 }
 
 // 커스텀 훅의 반환 타입 인터페이스
-export interface UseVoiceStreamingReturn {
+export interface UseVoiceConversationReturn {
   isRecording: boolean;
   statusMessage: string;
   errorMessage: string;
@@ -29,6 +29,9 @@ export interface UseVoiceStreamingReturn {
   lastAudioData: Float32Array | null;
   currentEmotion: string;
 }
+
+// 이전 버전과의 호환성을 위한 타입 정의
+export type UseVoiceStreamingReturn = UseVoiceConversationReturn;
 
 // 전역 Window 인터페이스 확장 정의
 export interface CustomWindow extends Window {

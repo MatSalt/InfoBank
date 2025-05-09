@@ -1,5 +1,5 @@
 import React from 'react';
-import { useVoiceStreaming } from '../hooks/useVoiceStreaming';
+import { useVoiceConversation } from '../hooks/useVoiceConversation';
 import Live2DAvatar from '../components/Live2DAvatar';
 import { AudioProvider } from '../contexts/AudioContext';
 import { EmotionType } from '../constants/emotions';
@@ -34,7 +34,7 @@ const VoiceChatWithLive2D: React.FC = () => {
     processingTime,
     lastAudioData,
     currentEmotion,
-  } = useVoiceStreaming();
+  } = useVoiceConversation();
 
   return (
     <div className="flex flex-col md:flex-row w-full min-h-screen bg-gradient-to-br from-purple-100 to-blue-100">

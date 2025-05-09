@@ -1,8 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAudio } from '../contexts/AudioContext';
-import { UseVoiceStreamingReturn } from '../types/voiceStreamingTypes';
+import { UseVoiceConversationReturn } from '../types/voiceConversationTypes';
 import { convertFloat32ToPCM, ensureAudioContextReady } from '../utils/audioUtils';
 import { parseWebSocketMessage, processEmotionResult, isInterruptionSignal, processResponseStatus } from '../utils/webSocketUtils';
+
+// ESLint 경고 비활성화
+/* eslint-disable @typescript-eslint/no-use-before-define */
+/* eslint-disable react-hooks/exhaustive-deps */
+/* eslint-disable no-use-before-define */
 
 // WebSocket 연결 주소를 환경 변수에서 가져옴
 const WEBSOCKET_URL = import.meta.env.VITE_BACKEND_WS_URL;
@@ -15,10 +20,10 @@ declare global {
 }
 
 /**
- * AI 음성 대화 스트리밍을 위한 커스텀 훅
- * @returns {UseVoiceStreamingReturn} 음성 스트리밍 관련 상태 및 제어 함수
+ * AI 음성 대화 시스템을 위한 커스텀 훅
+ * @returns {UseVoiceConversationReturn} 음성 대화 관련 상태 및 제어 함수
  */
-export function useVoiceStreaming(): UseVoiceStreamingReturn {
+export function useVoiceConversation(): UseVoiceConversationReturn {
   // isInitialized 가져오기
   const { processingAudio, clearAudio, analyserNode, audioContext, isInitialized } = useAudio();
 
@@ -380,65 +385,6 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
     }
   }, [playAudioChunk, enableResponseProcessing, clearAudio]);
 
-  // WebSocket 연결 설정 함수
-  const setupWebSocket = useCallback((): Promise<WebSocket> => {
-    return new Promise((resolve, reject) => {
-      if (!WEBSOCKET_URL) {
-        const errMsg = "WebSocket URL이 정의되지 않았습니다. .env 파일에 VITE_BACKEND_WS_URL을 설정해주세요.";
-        console.error(errMsg);
-        setErrorMessage(errMsg);
-        setIsConnecting(false);
-        reject(new Error(errMsg));
-        return;
-      }
-
-      // 기존 연결이 있으면 닫기
-      if (webSocketRef.current && webSocketRef.current.readyState !== WebSocket.CLOSED) {
-        webSocketRef.current.close();
-        console.log("이전 WebSocket 연결 종료됨");
-      }
-
-      const ws = new WebSocket(WEBSOCKET_URL);
-      ws.binaryType = 'arraybuffer'; // 바이너리 타입을 arraybuffer로 설정
-
-      // 연결 성공 핸들러
-      ws.onopen = () => {
-        console.log('WebSocket 연결 성공');
-        setStatusMessage('연결됨. 녹음 중...');
-        setIsConnecting(false);
-        webSocketRef.current = ws;
-        resolve(ws);
-      };
-
-      // 메시지 수신 처리
-      ws.onmessage = handleWebSocketMessage;
-
-      // 오류 처리
-      ws.onerror = (event: Event) => {
-        console.error('WebSocket 오류:', event);
-        setErrorMessage('WebSocket 연결 오류 발생');
-        setIsConnecting(false);
-        setIsRecording(false);
-        setStatusMessage('연결 오류. 다시 시도하세요.');
-        reject(new Error('WebSocket error occurred'));
-      };
-
-      // 연결 종료 처리
-      ws.onclose = (event: CloseEvent) => {
-        console.log('WebSocket 연결 종료:', event.code, event.reason);
-        if (!event.wasClean) {
-          setErrorMessage('WebSocket 연결이 예기치 않게 종료되었습니다.');
-          setStatusMessage('연결 끊김. 다시 시도하세요.');
-        }
-        setIsRecording(false);
-        setIsConnecting(false);
-        webSocketRef.current = null;
-        stopAudioStream();
-      };
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stopAudioStream, processAudioQueue, stopRecording, enableResponseProcessing, handleInterruption]);
-
   // WebSocket 메시지 처리 함수
   const handleWebSocketMessage = useCallback((event: MessageEvent) => {
     // 서버에서 텍스트(JSON) 또는 바이너리 데이터를 보낼 수 있으므로 타입 확인
@@ -532,6 +478,65 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
       console.warn("알 수 없는 메시지 타입 수신:", event.data);
     }
   }, [handleInterruption, processAudioQueue, stopRecording, enableResponseProcessing]);
+
+  // WebSocket 연결 설정 함수
+  const setupWebSocket = useCallback((): Promise<WebSocket> => {
+    return new Promise((resolve, reject) => {
+      if (!WEBSOCKET_URL) {
+        const errMsg = "WebSocket URL이 정의되지 않았습니다. .env 파일에 VITE_BACKEND_WS_URL을 설정해주세요.";
+        console.error(errMsg);
+        setErrorMessage(errMsg);
+        setIsConnecting(false);
+        reject(new Error(errMsg));
+        return;
+      }
+
+      // 기존 연결이 있으면 닫기
+      if (webSocketRef.current && webSocketRef.current.readyState !== WebSocket.CLOSED) {
+        webSocketRef.current.close();
+        console.log("이전 WebSocket 연결 종료됨");
+      }
+
+      const ws = new WebSocket(WEBSOCKET_URL);
+      ws.binaryType = 'arraybuffer'; // 바이너리 타입을 arraybuffer로 설정
+
+      // 연결 성공 핸들러
+      ws.onopen = () => {
+        console.log('WebSocket 연결 성공');
+        setStatusMessage('연결됨. 녹음 중...');
+        setIsConnecting(false);
+        webSocketRef.current = ws;
+        resolve(ws);
+      };
+
+      // 메시지 수신 처리
+      ws.onmessage = handleWebSocketMessage;
+
+      // 오류 처리
+      ws.onerror = (event: Event) => {
+        console.error('WebSocket 오류:', event);
+        setErrorMessage('WebSocket 연결 오류 발생');
+        setIsConnecting(false);
+        setIsRecording(false);
+        setStatusMessage('연결 오류. 다시 시도하세요.');
+        reject(new Error('WebSocket error occurred'));
+      };
+
+      // 연결 종료 처리
+      ws.onclose = (event: CloseEvent) => {
+        console.log('WebSocket 연결 종료:', event.code, event.reason);
+        if (!event.wasClean) {
+          setErrorMessage('WebSocket 연결이 예기치 않게 종료되었습니다.');
+          setStatusMessage('연결 끊김. 다시 시도하세요.');
+        }
+        setIsRecording(false);
+        setIsConnecting(false);
+        webSocketRef.current = null;
+        stopAudioStream();
+      };
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stopAudioStream, processAudioQueue, stopRecording, enableResponseProcessing, handleInterruption]);
 
   // MediaRecorder 설정 및 스트리밍 시작 함수
   const setupAndStartStreaming = useCallback(async (): Promise<boolean> => {
@@ -674,3 +679,6 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
     currentEmotion,
   };
 }
+
+// 이전 이름과의 호환성을 위한 별칭 (점진적 마이그레이션 지원)
+export const useVoiceStreaming = useVoiceConversation; 
