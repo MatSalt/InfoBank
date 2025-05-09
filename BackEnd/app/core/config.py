@@ -6,13 +6,25 @@ from dotenv import load_dotenv
 # .env 파일로부터 환경 변수 로드
 load_dotenv()
 
+# 현재 환경 확인
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development").lower()
+
+# 기본 CORS 설정 - 환경에 따라 다른 기본값 사용
+DEFAULT_ALLOWED_ORIGINS = [
+    "http://localhost:5173",  # 로컬 개발 서버 (Vite 기본 포트)
+    "http://localhost:3000",  # 로컬 개발 서버 (일반적인 포트)
+    "http://127.0.0.1:5173",  # 로컬 IP
+    "http://127.0.0.1:3000",  # 로컬 IP
+]
+
 class Settings(BaseSettings):
     # 서버 설정
     SERVER_HOST: str = os.getenv("SERVER_HOST", "0.0.0.0") # 서버 호스트 주소
     SERVER_PORT: int = int(os.getenv("PORT", "8080")) # 서버 포트 (PORT 환경 변수 사용)
     
-    # CORS 설정 - 모든 오리진 허용
-    ALLOWED_ORIGINS: List[str] = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+    # CORS 설정 - 특정 도메인만 허용
+    # "*"는 모든 오리진을 허용하므로 프로덕션 환경에서는 사용하지 않아야 함
+    ALLOWED_ORIGINS: List[str] = os.getenv("ALLOWED_ORIGINS", ",".join(DEFAULT_ALLOWED_ORIGINS)).split(",")
 
     # Google Cloud 설정 - 기본값 없음, 필수 설정
     GOOGLE_CLOUD_PROJECT_ID: str = os.getenv("GOOGLE_CLOUD_PROJECT_ID", "") 
@@ -63,6 +75,14 @@ def validate_required_settings():
             f"다음 필수 환경 변수가 설정되지 않았습니다: {', '.join(missing_vars)}.\n"
             "환경 변수나 .env 파일에 이 값들을 설정해주세요.\n"
             "이는 보안을 위해 하드코딩된 기본값을 제거한 결과입니다."
+        )
+    
+    # CORS 설정 검증
+    if "*" in settings.ALLOWED_ORIGINS and ENVIRONMENT == "production":
+        import warnings
+        warnings.warn(
+            "보안 경고: 프로덕션 환경에서 모든 오리진(*)을 허용하는 CORS 설정이 감지되었습니다.\n"
+            "프로덕션 환경에서는 정확한 도메인 목록을 ALLOWED_ORIGINS 환경 변수에 설정하세요."
         )
 
 # 필수 환경 변수 검증 실행

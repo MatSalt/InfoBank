@@ -21,12 +21,51 @@
 |------------|-------------|---------|
 | `SERVER_HOST` | 서버 호스트 주소 | `0.0.0.0` |
 | `PORT` | 서버 포트 | `8080` |
-| `ALLOWED_ORIGINS` | CORS 허용 출처 | `*` (모든 출처) |
+| `ALLOWED_ORIGINS` | CORS 허용 출처 | 개발환경 도메인 목록 |
+| `ENVIRONMENT` | 실행 환경 (development/production) | `development` |
 | `STT_SAMPLE_RATE` | 오디오 샘플링 레이트 | `16000` |
 | `STT_LANGUAGE_CODES` | 인식할 언어 코드 목록 | `en-US,ko-KR` |
 | `STT_MODEL` | STT 모델 | `telephony` |
 | `GEMINI_MODEL` | Gemini 모델 | `gemini-1.5-flash-002` |
 | `USE_VERTEX_AI` | Vertex AI 사용 여부 | `True` |
+
+## CORS 설정 가이드
+
+### ALLOWED_ORIGINS 환경 변수
+
+이 환경 변수는 Cross-Origin Resource Sharing(CORS) 보안 정책을 설정하는 데 사용됩니다. 서버에 접근할 수 있는 도메인을 제어하여 웹 애플리케이션의 보안을 강화합니다.
+
+#### 개발 환경
+
+개발 환경에서는 기본적으로 다음 도메인이 허용됩니다:
+- `http://localhost:5173` (Vite 개발 서버)
+- `http://localhost:3000`
+- `http://127.0.0.1:5173`
+- `http://127.0.0.1:3000`
+
+#### 프로덕션 환경
+
+**프로덕션 환경에서는 반드시 명시적인 도메인 목록을 지정해야 합니다.** 와일드카드(`*`)를 사용하면 보안 취약점이 발생할 수 있습니다.
+
+```
+# 올바른 설정 예시 (프로덕션)
+ALLOWED_ORIGINS=https://yourdomain.com,https://api.yourdomain.com,https://admin.yourdomain.com
+```
+
+#### 여러 도메인 지정 방법
+
+쉼표(,)로 구분된 도메인 목록을 사용합니다:
+
+```
+ALLOWED_ORIGINS=https://domain1.com,https://domain2.com,https://domain3.com
+```
+
+#### 보안 위험
+
+모든 도메인을 허용하는 `*` 설정은 다음과 같은 보안 위험이 있습니다:
+- 크로스 사이트 요청 위조(CSRF) 공격 취약성 증가
+- 악의적인 사이트에서 API에 액세스할 가능성
+- 데이터 유출 위험
 
 ## 환경 변수 설정 방법
 
@@ -44,6 +83,15 @@ TTS_LANGUAGE_CODE=ko-KR
 # 선택적 환경 변수
 SERVER_HOST=0.0.0.0
 PORT=8080
+
+# 환경 설정
+ENVIRONMENT=development
+
+# CORS 설정 (개발 환경)
+ALLOWED_ORIGINS=http://localhost:5173,http://localhost:3000
+
+# CORS 설정 (프로덕션 환경)
+# ALLOWED_ORIGINS=https://yourdomain.com,https://admin.yourdomain.com
 ```
 
 ### 2. 시스템 환경 변수 사용
@@ -54,10 +102,14 @@ PORT=8080
 # Linux/Mac
 export GOOGLE_CLOUD_PROJECT_ID=your-project-id
 export VERTEX_AI_LOCATION=asia-northeast3
+export ALLOWED_ORIGINS=https://yourdomain.com,https://admin.yourdomain.com
+export ENVIRONMENT=production
 
 # Windows
 set GOOGLE_CLOUD_PROJECT_ID=your-project-id
 set VERTEX_AI_LOCATION=asia-northeast3
+set ALLOWED_ORIGINS=https://yourdomain.com,https://admin.yourdomain.com
+set ENVIRONMENT=production
 ```
 
 ### 3. Docker 환경 변수 사용
@@ -65,7 +117,12 @@ set VERTEX_AI_LOCATION=asia-northeast3
 Docker를 사용하는 경우 다음과 같이 환경 변수를 전달할 수 있습니다:
 
 ```bash
-docker run -e GOOGLE_CLOUD_PROJECT_ID=your-project-id -e VERTEX_AI_LOCATION=asia-northeast3 -p 8080:8080 infobank-api
+docker run \
+  -e GOOGLE_CLOUD_PROJECT_ID=your-project-id \
+  -e VERTEX_AI_LOCATION=asia-northeast3 \
+  -e ALLOWED_ORIGINS=https://yourdomain.com,https://admin.yourdomain.com \
+  -e ENVIRONMENT=production \
+  -p 8080:8080 infobank-api
 ```
 
 ## 보안 고려사항

@@ -19,6 +19,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# 현재 환경 확인
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development").lower()
+
 # FastAPI 애플리케이션 인스턴스 생성
 app = FastAPI(
     title="InfoBank API",
@@ -40,16 +43,22 @@ app.add_middleware(
 async def startup_event():
     """서버 시작 시 초기화 작업 수행"""
     # 환경 변수 설정 상태 로깅
-    logger.info("서버 시작: 환경 변수 설정 확인")
+    logger.info(f"서버 시작: 환경 변수 설정 확인 (환경: {ENVIRONMENT})")
     logger.info(f"서버 설정: 호스트={settings.SERVER_HOST}, 포트={settings.SERVER_PORT}")
-    logger.info(f"CORS 허용 출처: {settings.ALLOWED_ORIGINS}")
+    
+    # CORS 설정 로깅
+    if "*" in settings.ALLOWED_ORIGINS:
+        if ENVIRONMENT == "production":
+            logger.warning("보안 경고: 프로덕션 환경에서 모든 오리진(*)을 허용하는 CORS 설정이 감지되었습니다.")
+            logger.warning("프로덕션 환경에서는 ALLOWED_ORIGINS 환경 변수에 특정 도메인만 허용하도록 설정하세요.")
+            logger.warning("예시: ALLOWED_ORIGINS=https://yourdomain.com,https://admin.yourdomain.com")
+        else:
+            logger.info("CORS 설정: 모든 오리진 허용 (* 설정 감지됨, 개발 환경에서만 사용하세요)")
+    else:
+        logger.info(f"CORS 허용 출처: {', '.join(settings.ALLOWED_ORIGINS)}")
+    
     logger.info(f"Google Cloud 프로젝트: {settings.GOOGLE_CLOUD_PROJECT_ID}")
     
-    # 보안 경고 (프로덕션 환경에서 CORS 설정이 * 인 경우)
-    if "*" in settings.ALLOWED_ORIGINS and os.getenv("ENVIRONMENT", "").lower() == "production":
-        logger.warning("보안 경고: 프로덕션 환경에서 모든 오리진(*)을 허용하는 CORS 설정이 감지되었습니다. 특정 도메인으로 제한하는 것을 권장합니다.")
-    
-    # 기존 초기화 로직이 있다면 여기에 추가
     # 벡터 저장소 로드
     logger.info("서버 시작 시 벡터 저장소 로드 중...")
     try:
