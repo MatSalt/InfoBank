@@ -259,15 +259,16 @@ const Live2DCanvas = ({ modelPath, emotion = "중립", backgroundImage }) => {
         }
         console.log('모델 크기:', model.width, model.height);
 
+        // 모델 크기 조정 - 상반신만 보이도록 스케일 조정
         const scale = Math.min(
-          pixiAppRef.current.renderer.width / (model.width * 1.2),
-          pixiAppRef.current.renderer.height / (model.height * 1.2)
-        );
+          pixiAppRef.current.renderer.width / (model.width * 0.8), // 0.8로 변경하여 모델을 더 크게 표시
+          pixiAppRef.current.renderer.height / (model.height * 0.8) // 0.8로 변경하여 모델을 더 크게 표시
+        ) * 1.5; // 추가 스케일 적용
 
         model.scale.set(scale);
-        model.anchor.set(0.5, 0.5);
+        model.anchor.set(0.5, 0.3); // 앵커 포인트를 위쪽으로 이동 (0.5, 0.3)
         model.x = pixiAppRef.current.renderer.width / 2;
-        model.y = (pixiAppRef.current.renderer.height / 2) - (model.height * scale * 0.1);
+        model.y = (pixiAppRef.current.renderer.height / 2) + 80; // 80픽셀 아래로 이동
         model.interactive = true;
 
         // --- Idle 모션 그룹 비활성화 유지 ---
@@ -357,12 +358,13 @@ const Live2DCanvas = ({ modelPath, emotion = "중립", backgroundImage }) => {
         // 모델 크기 및 위치 재계산 (모델 로드 완료 후)
         if (modelRef.current.width && modelRef.current.height) {
             const scale = Math.min(
-              pixiAppRef.current.renderer.width / (modelRef.current.width * 1.2),
-              pixiAppRef.current.renderer.height / (modelRef.current.height * 1.2)
-            );
+              pixiAppRef.current.renderer.width / (modelRef.current.width * 0.8),
+              pixiAppRef.current.renderer.height / (modelRef.current.height * 0.8)
+            ) * 1.5;
             modelRef.current.scale.set(scale);
+            modelRef.current.anchor.set(0.5, 0.3);
             modelRef.current.x = pixiAppRef.current.renderer.width / 2;
-            modelRef.current.y = (pixiAppRef.current.renderer.height / 2) - (modelRef.current.height * scale * 0.1);
+            modelRef.current.y = (pixiAppRef.current.renderer.height / 2) + 80; // 80픽셀 아래로 이동
         }
     };
 
