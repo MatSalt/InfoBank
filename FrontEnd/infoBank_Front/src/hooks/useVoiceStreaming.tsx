@@ -89,9 +89,9 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
   const audioQueueRef = useRef<Uint8Array[]>([]);
   const isPlayingRef = useRef<boolean>(false);
 
-  // 마이크 활성화 대기 플래그 추가
-  const pendingMicEnableRef = useRef<boolean>(false);
-  const pendingMicMessageRef = useRef<string>('');
+  // 응답 처리 활성화 대기 플래그 추가
+  const pendingResponseEnableRef = useRef<boolean>(false);
+  const pendingResponseMessageRef = useRef<string>('');
 
   // 추가할 상태 변수들
   const responseStartTimeRef = useRef<number | null>(null);
@@ -105,8 +105,8 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
     setIsSupported(!!(navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function' && window.WebSocket));
   }, []);
 
-  // 마이크 활성화 함수를 먼저 선언
-  const enableMicrophone = useCallback((message: string) => {
+  // 응답 처리 종료 함수를 먼저 선언
+  const enableResponseProcessing = useCallback((message: string) => {
     if (audioStreamRef.current) {
       setTimeout(() => {
         if (audioStreamRef.current) {
@@ -125,7 +125,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
           responseStartTimeRef.current = null;
           isFirstAudioChunkRef.current = true;
         }
-        pendingMicEnableRef.current = false;
+        pendingResponseEnableRef.current = false;
       }, 300);
     }
   }, []);
@@ -205,7 +205,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
   const stopAudioStream = useCallback((): void => {
     if (audioStreamRef.current) {
       audioStreamRef.current.getTracks().forEach(track => track.stop());
-      console.log("마이크 스트림 중지됨");
+      console.log("오디오 스트림 중지됨");
       audioStreamRef.current = null;
     }
     
@@ -429,11 +429,11 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
     setCurrentEmotion("중립"); // 오디오 재생 완료 후 감정을 중립으로 되돌림
     console.log("오디오 큐 처리 완료 및 clearAudio 호출됨. 감정 상태를 '중립'으로 재설정합니다.");
 
-    if (pendingMicEnableRef.current) {
-      console.log("모든 오디오 재생 완료 후 마이크 활성화 실행");
-      enableMicrophone(pendingMicMessageRef.current);
+    if (pendingResponseEnableRef.current) {
+      console.log("모든 오디오 재생 완료 후 응답 처리 종료 실행");
+      enableResponseProcessing(pendingResponseMessageRef.current);
     }
-  }, [playAudioChunk, enableMicrophone, clearAudio]); // clearAudio 의존성 추가
+  }, [playAudioChunk, enableResponseProcessing, clearAudio]); // enableResponseProcessing, clearAudio 의존성 추가
 
   // WebSocket 연결 설정 함수
   const setupWebSocket = useCallback((): Promise<WebSocket> => {
@@ -498,13 +498,13 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
                     // UI 상태 설정 (응답 처리 상태는 활성화)
                     setIsResponseProcessing(true);
                   } else if (data.action === 'end_processing') {
-                    // 기존 마이크 활성화 코드와 동일하게 처리
-                    pendingMicEnableRef.current = true;
-                    pendingMicMessageRef.current = data.message || '말씀하세요...';
+                    // 응답 처리 종료 코드와 동일하게 처리
+                    pendingResponseEnableRef.current = true;
+                    pendingResponseMessageRef.current = data.message || '말씀하세요...';
                     
                     // 오디오 큐가 비어있는 경우에만 즉시 상태 업데이트
                     if (audioQueueRef.current.length === 0 && !isPlayingRef.current) {
-                      enableMicrophone(pendingMicMessageRef.current);
+                      enableResponseProcessing(pendingResponseMessageRef.current);
                     } else {
                       console.log(`아직 ${audioQueueRef.current.length}개의 오디오가 큐에 있고, 재생 중 상태: ${isPlayingRef.current}`);
                     }
@@ -513,7 +513,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
                 // --- 응답 상태 메시지 처리 끝 ---
 
                 // 기타 텍스트 기반 메시지 처리 (transcript, is_final, error 등)
-                if (data.transcript) { // 조건문을 분리하여 인터럽션/마이크 제어와 별개로 처리
+                if (data.transcript) { // 조건문을 분리하여 인터럽션/응답 처리와 별개로 처리
                     setTranscript(prev => prev + data.transcript);
                     setStatusMessage('텍스트 수신 중...');
                 }
@@ -584,12 +584,12 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
         stopAudioStream(); // WebSocket 종료 시 스트림도 확실히 정리
       };
     });
-  }, [stopAudioStream, processAudioQueue, stopRecording, enableMicrophone]); // enableMicrophone, stopRecording, processAudioQueue 의존성 추가
+  }, [stopAudioStream, processAudioQueue, stopRecording, enableResponseProcessing]); // enableResponseProcessing 의존성 추가
 
   // MediaRecorder 설정 및 스트리밍 시작 함수
   const setupAndStartStreaming = useCallback(async (): Promise<boolean> => {
     if (!isSupported) {
-      setErrorMessage('마이크 녹음 또는 WebSocket을 지원하지 않는 브라우저입니다.');
+      setErrorMessage('오디오 입력 또는 WebSocket을 지원하지 않는 브라우저입니다.');
       return false;
     }
 
@@ -658,15 +658,15 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
       return true;
 
     } catch (err) {
-      console.error('마이크 접근 또는 오디오 처리 설정 오류:', err);
+      console.error('오디오 입력 접근 또는 오디오 처리 설정 오류:', err);
       if (err instanceof Error) { // Error 타입인지 확인
           if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-            setErrorMessage('마이크 사용 권한이 거부되었습니다.');
+            setErrorMessage('오디오 입력 사용 권한이 거부되었습니다.');
           } else {
-            setErrorMessage(`마이크 오류: ${err.message}`);
+            setErrorMessage(`오디오 입력 오류: ${err.message}`);
           }
       } else {
-           setErrorMessage('알 수 없는 마이크 접근 오류 발생');
+           setErrorMessage('알 수 없는 오디오 입력 접근 오류 발생');
       }
       setIsConnecting(false);
 
@@ -707,7 +707,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
   useEffect(() => {
     return () => {
       // 컴포넌트 언마운트 시 정리
-      pendingMicEnableRef.current = false;
+      pendingResponseEnableRef.current = false;
       
       // 모든 활성 소스 노드 정리
       activeSourceNodes.current.forEach(node => {

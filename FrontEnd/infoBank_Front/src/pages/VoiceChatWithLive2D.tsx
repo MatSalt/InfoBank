@@ -60,7 +60,7 @@ const VoiceChatWithLive2D: React.FC = () => {
         <div className="w-full max-w-md p-6 bg-white rounded-xl shadow-lg">
           <h1 className="text-2xl font-bold mb-4 text-center text-gray-800">AI 음성 대화</h1>
           
-          {/* 마이크 상태 표시 */}
+          {/* 오디오 입력 상태 표시 */}
           <div className={`relative mx-auto w-20 h-20 rounded-full flex items-center justify-center mb-4 transition-all duration-300
             ${isResponseProcessing 
               ? 'bg-red-100 border-2 border-red-400' 
@@ -68,7 +68,7 @@ const VoiceChatWithLive2D: React.FC = () => {
                 ? 'bg-green-100 border-2 border-green-500 animate-pulse' 
                 : 'bg-gray-100 border-2 border-gray-300'}`}>
             
-            {/* 마이크 아이콘 */}
+            {/* 오디오 입력 아이콘 */}
             <svg 
               className={`w-10 h-10 transition-all duration-300 ${isResponseProcessing ? 'text-red-500' : isRecording ? 'text-green-600' : 'text-gray-500'}`} 
               fill="none" 
@@ -103,7 +103,7 @@ const VoiceChatWithLive2D: React.FC = () => {
           {/* 지원 오류 메시지 */}
           {!isSupported && (
             <div className="mb-4 p-3 bg-red-100 rounded-lg text-red-600 text-sm">
-              ⚠️ 현재 브라우저에서는 마이크 녹음 또는 WebSocket을 지원하지 않습니다. 최신 Chrome, Firefox, Edge 브라우저를 사용해 주세요.
+              ⚠️ 현재 브라우저에서는 오디오 입력 또는 WebSocket을 지원하지 않습니다. 최신 Chrome, Firefox, Edge 브라우저를 사용해 주세요.
             </div>
           )}
           
