@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from typing import List
+from typing import List, Dict
 import os
 from dotenv import load_dotenv
 
@@ -14,8 +14,8 @@ class Settings(BaseSettings):
     # CORS 설정 - 모든 오리진 허용
     ALLOWED_ORIGINS: List[str] = os.getenv("ALLOWED_ORIGINS", "*").split(",")
 
-    # Google Cloud 설정
-    GOOGLE_CLOUD_PROJECT_ID: str = os.getenv("GOOGLE_CLOUD_PROJECT_ID", "civil-hull-456308-c4") # 기본값 제거, 필수 설정으로 변경
+    # Google Cloud 설정 - 기본값 없음, 필수 설정
+    GOOGLE_CLOUD_PROJECT_ID: str = os.getenv("GOOGLE_CLOUD_PROJECT_ID", "") 
 
     # STT (Speech-to-Text) 설정
     STT_SAMPLE_RATE: int = int(os.getenv("STT_SAMPLE_RATE", "16000")) # 오디오 샘플링 레이트 (Hz)
@@ -40,14 +40,30 @@ class Settings(BaseSettings):
 # 설정 객체 인스턴스 생성
 settings = Settings()
 
-# 필수 환경 변수 확인 (GCP Project ID)
-if not settings.GOOGLE_CLOUD_PROJECT_ID:
-    raise ValueError("GOOGLE_CLOUD_PROJECT_ID가 설정되지 않았습니다. 환경 변수나 .env 파일에 설정해주세요.")
-# --- Vertex AI 리전 확인 추가 ---
-if not settings.VERTEX_AI_LOCATION:
-    raise ValueError("VERTEX_AI_LOCATION이 설정되지 않았습니다. 환경 변수나 .env 파일에 설정해주세요.")
-# --- TTS 설정 확인 추가 ---
-if not settings.TTS_VOICE_NAME:
-    raise ValueError("TTS_VOICE_NAME이 설정되지 않았습니다. 환경 변수나 .env 파일에 설정해주세요.")
-if not settings.TTS_LANGUAGE_CODE:
-    raise ValueError("TTS_LANGUAGE_CODE가 설정되지 않았습니다. 환경 변수나 .env 파일에 설정해주세요.") 
+# 필수 환경 변수 검증
+def validate_required_settings():
+    """필수 환경 변수가 설정되었는지 검증하고, 누락된 경우 오류 메시지를 생성합니다."""
+    missing_vars = []
+    
+    # Google Cloud 필수 설정
+    if not settings.GOOGLE_CLOUD_PROJECT_ID:
+        missing_vars.append("GOOGLE_CLOUD_PROJECT_ID")
+    if not settings.VERTEX_AI_LOCATION:
+        missing_vars.append("VERTEX_AI_LOCATION")
+    
+    # TTS 필수 설정
+    if not settings.TTS_VOICE_NAME:
+        missing_vars.append("TTS_VOICE_NAME")
+    if not settings.TTS_LANGUAGE_CODE:
+        missing_vars.append("TTS_LANGUAGE_CODE")
+    
+    # 누락된 환경 변수가 있으면 오류 발생
+    if missing_vars:
+        raise ValueError(
+            f"다음 필수 환경 변수가 설정되지 않았습니다: {', '.join(missing_vars)}.\n"
+            "환경 변수나 .env 파일에 이 값들을 설정해주세요.\n"
+            "이는 보안을 위해 하드코딩된 기본값을 제거한 결과입니다."
+        )
+
+# 필수 환경 변수 검증 실행
+validate_required_settings() 
