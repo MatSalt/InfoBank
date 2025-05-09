@@ -436,6 +436,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
         stopAudioStream();
       };
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stopAudioStream, processAudioQueue, stopRecording, enableResponseProcessing, handleInterruption]);
 
   // WebSocket 메시지 처리 함수
