@@ -494,6 +494,9 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
                     // 상태 메시지 업데이트
                     setMicStatusMessage(data.message || 'AI가 응답 중입니다...');
                     setStatusMessage(data.message || 'AI가 응답 중입니다...');
+                    
+                    // UI 상태 설정 (마이크 비활성화 상태는 유지)
+                    setIsMicDisabled(true);
                   } else if (data.action === 'end_processing') {
                     // 기존 마이크 활성화 코드와 동일하게 처리
                     pendingMicEnableRef.current = true;
@@ -508,42 +511,6 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
                   }
                 }
                 // --- 응답 상태 메시지 처리 끝 ---
-
-                // 기존 마이크 제어 메시지 처리 (하위 호환성 유지)
-                else if (data.control === 'mic_status') { // 'else if'로 변경하여 인터럽션 메시지와 중복 처리 방지
-                  if (data.action === 'disable') {
-                    // 마이크 비활성화 시간 기록
-                    if (audioStreamRef.current) {
-                      console.log('마이크 비활성화 요청을 받았지만, AEC 기능으로 처리됨:', data.reason);
-                      /* 마이크 비활성화 코드 주석 처리 - AEC로 대체
-                      audioStreamRef.current.getAudioTracks().forEach(track => {
-                        track.enabled = false;
-                      });
-                      setIsMicDisabled(true);
-                      */
-
-                      // 상태 메시지는 업데이트
-                      setMicStatusMessage(data.message || 'AI가 응답 중입니다...');
-                      setStatusMessage(data.message || 'AI가 응답 중입니다...');
-
-                      // 마이크 비활성화 시간 기록
-                      micDisabledTimeRef.current = Date.now();
-                      isFirstAudioChunkRef.current = true; // 첫 오디오 플래그 초기화
-                    }
-                  } else if (data.action === 'enable') {
-                    // 마이크 활성화 요청을 즉시 처리하지 않고 플래그로 저장
-                    console.log('마이크 활성화 요청 받음 - 오디오 재생 완료 후 처리 예정:', data.reason);
-                    pendingMicEnableRef.current = true;
-                    pendingMicMessageRef.current = data.message || '말씀하세요...';
-
-                    // 오디오 큐가 비어있는 경우에만 즉시 활성화
-                    if (audioQueueRef.current.length === 0 && !isPlayingRef.current) {
-                      enableMicrophone(pendingMicMessageRef.current);
-                    } else {
-                      console.log(`아직 ${audioQueueRef.current.length}개의 오디오가 큐에 있고, 재생 중 상태: ${isPlayingRef.current}`);
-                    }
-                  }
-                }
 
                 // 기타 텍스트 기반 메시지 처리 (transcript, is_final, error 등)
                 if (data.transcript) { // 조건문을 분리하여 인터럽션/마이크 제어와 별개로 처리

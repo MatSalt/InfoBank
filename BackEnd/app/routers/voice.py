@@ -383,14 +383,14 @@ async def websocket_endpoint(websocket: WebSocket):
         if is_connected and websocket.client_state == WebSocketState.CONNECTED:
             try:
                 await websocket.send_json({
-                    "control": "mic_status",
-                    "action": "enable",
+                    "control": "response_status",
+                    "action": "end_processing",
                     "reason": "interruption",
                     "message": "AI 응답이 중단되었습니다. 계속 말씀하세요."
                 })
-                logger.debug(f"[{client_info}] 인터럽션 후 마이크 활성화 요청 전송")
+                logger.debug(f"[{client_info}] 인터럽션 후 응답 처리 종료 신호 전송")
             except Exception as e:
-                logger.error(f"[{client_info}] 인터럽션 후 마이크 활성화 메시지 전송 중 오류: {e}")
+                logger.error(f"[{client_info}] 인터럽션 후 응답 처리 종료 메시지 전송 중 오류: {e}")
         
         logger.info(f"[{client_info}] 인터럽션 처리 완료")
 
