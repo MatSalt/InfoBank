@@ -129,12 +129,12 @@ async def websocket_endpoint(websocket: WebSocket):
             # LLM 호출 직전에 마이크 비활성화 요청 전송
             if is_connected and ws.client_state == WebSocketState.CONNECTED:
                 await ws.send_json({
-                    "control": "mic_status",
-                    "action": "disable",
+                    "control": "response_status",
+                    "action": "start_processing",
                     "reason": "processing",
                     "message": "AI가 응답 중입니다..."
                 })
-                logger.debug(f"[{client_id}] LLM 처리를 위한 마이크 비활성화 요청 전송")
+                logger.debug(f"[{client_id}] 응답 처리 시간 측정 시작 신호 전송")
             
             # 기존 LLM 및 TTS 스트리밍 로직
             llm_stream = stream_llm_response(transcript, client_id, user_id)
@@ -165,8 +165,8 @@ async def websocket_endpoint(websocket: WebSocket):
             # TTS 전송 완료 후 마이크 활성화 요청 전송
             if is_connected and ws.client_state == WebSocketState.CONNECTED:
                 await ws.send_json({
-                    "control": "mic_status",
-                    "action": "enable",
+                    "control": "response_status",
+                    "action": "end_processing",
                     "reason": "processing_complete",
                     "message": "AI 응답이 완료되었습니다. 대화를 계속하세요.",
                     "audioInfo": {
@@ -174,7 +174,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         "estimatedDuration": tts_duration
                     }
                 })
-                logger.debug(f"[{client_id}] TTS 재생 완료를 위한 마이크 활성화 요청 전송")
+                logger.debug(f"[{client_id}] 응답 처리 완료 신호 전송")
         
         except Exception as e:
             logger.error(f"[{client_id}] TTS 스트림 처리 중 오류: {e}", exc_info=True)
@@ -182,13 +182,13 @@ async def websocket_endpoint(websocket: WebSocket):
             if is_connected and ws.client_state == WebSocketState.CONNECTED:
                 try:
                     await ws.send_json({
-                        "control": "mic_status",
-                        "action": "enable",
+                        "control": "response_status",
+                        "action": "end_processing",
                         "reason": "error",
                         "message": "오류가 발생했습니다. 다시 시도해주세요."
                     })
                 except Exception as send_err:
-                    logger.error(f"[{client_id}] 오류 후 마이크 활성화 메시지 전송 중 추가 오류: {send_err}")
+                    logger.error(f"[{client_id}] 오류 후 응답 처리 완료 메시지 전송 중 추가 오류: {send_err}")
 
     # --- 감정 분석 및 결과 전송 함수 (신규 추가) ---
     async def handle_emotion_analysis(transcript: str, ws: WebSocket, client_id: str):

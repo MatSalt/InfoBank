@@ -484,7 +484,32 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
                 }
                 // --- 인터럽션 처리 로직 끝 ---
 
-                // 기존 마이크 제어 메시지 처리
+                // --- 응답 상태 메시지 처리 (새로 추가) ---
+                else if (data.control === 'response_status') {
+                  if (data.action === 'start_processing') {
+                    // 응답 처리 시작 시간 기록
+                    micDisabledTimeRef.current = Date.now();
+                    isFirstAudioChunkRef.current = true;
+                    
+                    // 상태 메시지 업데이트
+                    setMicStatusMessage(data.message || 'AI가 응답 중입니다...');
+                    setStatusMessage(data.message || 'AI가 응답 중입니다...');
+                  } else if (data.action === 'end_processing') {
+                    // 기존 마이크 활성화 코드와 동일하게 처리
+                    pendingMicEnableRef.current = true;
+                    pendingMicMessageRef.current = data.message || '말씀하세요...';
+                    
+                    // 오디오 큐가 비어있는 경우에만 즉시 상태 업데이트
+                    if (audioQueueRef.current.length === 0 && !isPlayingRef.current) {
+                      enableMicrophone(pendingMicMessageRef.current);
+                    } else {
+                      console.log(`아직 ${audioQueueRef.current.length}개의 오디오가 큐에 있고, 재생 중 상태: ${isPlayingRef.current}`);
+                    }
+                  }
+                }
+                // --- 응답 상태 메시지 처리 끝 ---
+
+                // 기존 마이크 제어 메시지 처리 (하위 호환성 유지)
                 else if (data.control === 'mic_status') { // 'else if'로 변경하여 인터럽션 메시지와 중복 처리 방지
                   if (data.action === 'disable') {
                     // 마이크 비활성화 시간 기록
