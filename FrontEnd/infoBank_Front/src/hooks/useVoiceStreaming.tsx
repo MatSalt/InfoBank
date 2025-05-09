@@ -36,8 +36,8 @@ interface UseVoiceStreamingReturn {
   transcript: string;
   startRecording: () => Promise<void>;
   stopRecording: () => void;
-  isMicDisabled: boolean;
-  micStatusMessage: string;
+  isResponseProcessing: boolean;
+  responseStatusMessage: string;
   processingTime: number | null;
   isPlayingAudio: boolean;
   lastAudioData: Float32Array | null;
@@ -74,8 +74,8 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
   const [isSupported, setIsSupported] = useState<boolean>(false);
   const [isConnecting, setIsConnecting] = useState<boolean>(false);
   const [transcript, setTranscript] = useState<string>('');
-  const [isMicDisabled, setIsMicDisabled] = useState<boolean>(false);
-  const [micStatusMessage, setMicStatusMessage] = useState<string>('');
+  const [isResponseProcessing, setIsResponseProcessing] = useState<boolean>(false);
+  const [responseStatusMessage, setResponseStatusMessage] = useState<string>('');
   const [processingTime, setProcessingTime] = useState<number | null>(null);
   const [isPlayingAudio, setIsPlayingAudio] = useState<boolean>(false);
   const [lastAudioData, setLastAudioData] = useState<Float32Array | null>(null);
@@ -94,7 +94,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
   const pendingMicMessageRef = useRef<string>('');
 
   // 추가할 상태 변수들
-  const micDisabledTimeRef = useRef<number | null>(null);
+  const responseStartTimeRef = useRef<number | null>(null);
   const isFirstAudioChunkRef = useRef<boolean>(true);
 
   // 음성 스트리밍 훅 내부에 useRef 추가
@@ -115,14 +115,14 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
             track.enabled = true;
           });
           */
-          console.log('마이크 상태가 활성화로 변경되었습니다 (AEC로 이미 처리 중)');
-          setIsMicDisabled(false); // 상태만 변경
-          setMicStatusMessage('');
+          console.log('응답 처리가 종료되었습니다 (AEC로 이미 처리 중)');
+          setIsResponseProcessing(false); // 상태만 변경
+          setResponseStatusMessage('');
           setStatusMessage(message);
           
-          // 마이크가 다시 활성화될 때 시간 측정 변수 초기화
+          // 응답 처리가 종료될 때 시간 측정 변수 초기화
           // 주의: processingTime은 초기화하지 않고 유지 (화면에 계속 표시)
-          micDisabledTimeRef.current = null;
+          responseStartTimeRef.current = null;
           isFirstAudioChunkRef.current = true;
         }
         pendingMicEnableRef.current = false;
@@ -308,9 +308,9 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
         processingAudio(); // 오디오 처리 시작 알림
 
         // 첫 번째 오디오 청크인 경우 처리 시간 계산
-        if (isFirstAudioChunkRef.current && micDisabledTimeRef.current !== null) {
+        if (isFirstAudioChunkRef.current && responseStartTimeRef.current !== null) {
           const firstAudioTime = Date.now();
-          const timeTaken = (firstAudioTime - micDisabledTimeRef.current) / 1000; // 초 단위로 변환
+          const timeTaken = (firstAudioTime - responseStartTimeRef.current) / 1000; // 초 단위로 변환
           setProcessingTime(timeTaken);
           console.log(`첫 오디오 재생까지 소요 시간: ${timeTaken.toFixed(2)}초`);
           isFirstAudioChunkRef.current = false;
@@ -488,15 +488,15 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
                 else if (data.control === 'response_status') {
                   if (data.action === 'start_processing') {
                     // 응답 처리 시작 시간 기록
-                    micDisabledTimeRef.current = Date.now();
+                    responseStartTimeRef.current = Date.now();
                     isFirstAudioChunkRef.current = true;
                     
                     // 상태 메시지 업데이트
-                    setMicStatusMessage(data.message || 'AI가 응답 중입니다...');
+                    setResponseStatusMessage(data.message || 'AI가 응답 중입니다...');
                     setStatusMessage(data.message || 'AI가 응답 중입니다...');
                     
-                    // UI 상태 설정 (마이크 비활성화 상태는 유지)
-                    setIsMicDisabled(true);
+                    // UI 상태 설정 (응답 처리 상태는 활성화)
+                    setIsResponseProcessing(true);
                   } else if (data.action === 'end_processing') {
                     // 기존 마이크 활성화 코드와 동일하게 처리
                     pendingMicEnableRef.current = true;
@@ -731,8 +731,8 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
     transcript,
     startRecording,
     stopRecording,
-    isMicDisabled,
-    micStatusMessage,
+    isResponseProcessing,
+    responseStatusMessage,
     processingTime,
     isPlayingAudio,
     lastAudioData,

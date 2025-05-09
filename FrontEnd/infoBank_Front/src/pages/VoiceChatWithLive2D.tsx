@@ -29,8 +29,8 @@ const VoiceChatWithLive2D: React.FC = () => {
     transcript,
     startRecording,
     stopRecording,
-    isMicDisabled,
-    micStatusMessage,
+    isResponseProcessing,
+    responseStatusMessage,
     processingTime,
     lastAudioData,
     currentEmotion, // 감정 상태 추가
@@ -47,7 +47,7 @@ const VoiceChatWithLive2D: React.FC = () => {
           <Live2DAvatar audioData={lastAudioData} emotion={currentEmotion} />
           
           {/* 상태 오버레이 */}
-          {isMicDisabled && (
+          {isResponseProcessing && (
             <div className="absolute top-4 right-4 bg-red-500 text-white px-3 py-1 rounded-full text-sm animate-pulse">
               AI 응답 중...
             </div>
@@ -62,7 +62,7 @@ const VoiceChatWithLive2D: React.FC = () => {
           
           {/* 마이크 상태 표시 */}
           <div className={`relative mx-auto w-20 h-20 rounded-full flex items-center justify-center mb-4 transition-all duration-300
-            ${isMicDisabled 
+            ${isResponseProcessing 
               ? 'bg-red-100 border-2 border-red-400' 
               : isRecording 
                 ? 'bg-green-100 border-2 border-green-500 animate-pulse' 
@@ -70,7 +70,7 @@ const VoiceChatWithLive2D: React.FC = () => {
             
             {/* 마이크 아이콘 */}
             <svg 
-              className={`w-10 h-10 transition-all duration-300 ${isMicDisabled ? 'text-red-500' : isRecording ? 'text-green-600' : 'text-gray-500'}`} 
+              className={`w-10 h-10 transition-all duration-300 ${isResponseProcessing ? 'text-red-500' : isRecording ? 'text-green-600' : 'text-gray-500'}`} 
               fill="none" 
               stroke="currentColor" 
               viewBox="0 0 24 24" 
@@ -78,8 +78,8 @@ const VoiceChatWithLive2D: React.FC = () => {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
             </svg>
             
-            {/* 마이크 비활성화 시 X 표시 */}
-            {isMicDisabled && (
+            {/* 응답 처리 중일 때 X 표시 */}
+            {isResponseProcessing && (
               <div className="absolute inset-0 flex items-center justify-center">
                 <svg className="w-16 h-16 text-red-500 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" />
@@ -89,8 +89,8 @@ const VoiceChatWithLive2D: React.FC = () => {
           </div>
           
           {/* 상태 메시지 */}
-          <p className={`text-center font-medium mb-4 ${isMicDisabled ? 'text-red-600' : isRecording ? 'text-green-600' : 'text-gray-600'}`}>
-            {isMicDisabled ? micStatusMessage : statusMessage}
+          <p className={`text-center font-medium mb-4 ${isResponseProcessing ? 'text-red-600' : isRecording ? 'text-green-600' : 'text-gray-600'}`}>
+            {isResponseProcessing ? responseStatusMessage : statusMessage}
           </p>
           
           {/* 현재 감정 상태 표시 */}
@@ -119,14 +119,14 @@ const VoiceChatWithLive2D: React.FC = () => {
           {/* 시작/중지 버튼 */}
           <button
             onClick={isRecording ? stopRecording : startRecording}
-            disabled={!isSupported || isConnecting || isMicDisabled}
+            disabled={!isSupported || isConnecting || isResponseProcessing}
             className={`w-full px-6 py-4 rounded-lg text-white font-semibold shadow-md transition-all duration-300 ease-in-out ${
               isRecording
                 ? 'bg-red-500 hover:bg-red-600 animate-pulse' 
                 : 'bg-purple-600 hover:bg-purple-700'
-            } ${(!isSupported || isConnecting || isMicDisabled) ? 'opacity-50 cursor-not-allowed' : ''}`}
+            } ${(!isSupported || isConnecting || isResponseProcessing) ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
-            {isRecording ? '🔴 대화 중지' : (isConnecting ? '연결 중...' : (isMicDisabled ? '처리 중...' : '🎤 대화 시작'))}
+            {isRecording ? '🔴 대화 중지' : (isConnecting ? '연결 중...' : (isResponseProcessing ? '처리 중...' : '🎤 대화 시작'))}
           </button>
           
           {/* 인식된 텍스트 */}
