@@ -1,4 +1,8 @@
 import { WebSocketResponse } from '../types/voiceStreamingTypes';
+import { createLogger } from './logger';
+
+// 로거 인스턴스 생성
+const logger = createLogger('webSocketUtils');
 
 /**
  * WebSocket 메시지 처리 관련 유틸리티 함수 모음
@@ -13,7 +17,7 @@ export function parseWebSocketMessage(message: string): WebSocketResponse | null
   try {
     return JSON.parse(message) as WebSocketResponse;
   } catch (error) {
-    console.error('WebSocket 메시지 파싱 오류:', error);
+    logger.error('WebSocket 메시지 파싱 오류:', error);
     return null;
   }
 }
@@ -25,7 +29,7 @@ export function parseWebSocketMessage(message: string): WebSocketResponse | null
  */
 export function processEmotionResult(data: WebSocketResponse): string | null {
   if (data.type === "emotion_result" && data.emotion) {
-    console.log(`감정 분석 결과 수신: ${data.emotion}`);
+    logger.debug(`감정 분석 결과 수신: ${data.emotion}`);
     return data.emotion;
   }
   return null;

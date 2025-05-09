@@ -1,6 +1,10 @@
 /**
  * 오디오 처리 관련 유틸리티 함수 모음
  */
+import { createLogger } from './logger';
+
+// 로거 인스턴스 생성
+const logger = createLogger('audioUtils');
 
 /**
  * PCM 데이터(Int16Array)를 Float32Array로 변환
@@ -43,11 +47,11 @@ export async function ensureAudioContextReady(audioContext: AudioContext | null)
   try {
     if (audioContext.state === 'suspended') {
       await audioContext.resume();
-      console.log("AudioContext resumed.");
+      logger.debug("AudioContext resumed.");
     }
     return true;
   } catch (err) {
-    console.error("AudioContext resume 실패:", err);
+    logger.error("AudioContext resume 실패:", err);
     return false;
   }
 } 

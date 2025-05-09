@@ -4,6 +4,27 @@ import { Live2DModel } from 'pixi-live2d-display';
 // import { LiveAudioProcessor } from '../../utils/LiveAudioProcessor'; // 제거
 import { useAudio } from '../../contexts/AudioContext';
 
+// 로거 생성 (JS 파일에서 사용하는 간단한 로거)
+const LOG_LEVEL = {
+  ERROR: 0,
+  WARN: 1,
+  INFO: 2,
+  DEBUG: 3,
+  VERBOSE: 4
+};
+
+// 프로덕션 여부 확인 (Vite에서는 import.meta.env.PROD로 확인)
+const IS_PRODUCTION = import.meta.env.PROD === true;
+const CURRENT_LOG_LEVEL = IS_PRODUCTION ? LOG_LEVEL.INFO : LOG_LEVEL.VERBOSE;
+
+const logger = {
+  error: (message, ...args) => console.error(`[Live2DCanvas] ${message}`, ...args),
+  warn: (message, ...args) => CURRENT_LOG_LEVEL >= LOG_LEVEL.WARN && console.warn(`[Live2DCanvas] ${message}`, ...args),
+  info: (message, ...args) => CURRENT_LOG_LEVEL >= LOG_LEVEL.INFO && console.info(`[Live2DCanvas] ${message}`, ...args),
+  debug: (message, ...args) => CURRENT_LOG_LEVEL >= LOG_LEVEL.DEBUG && console.log(`[Live2DCanvas:debug] ${message}`, ...args),
+  verbose: (message, ...args) => CURRENT_LOG_LEVEL >= LOG_LEVEL.VERBOSE && console.log(`[Live2DCanvas:verbose] ${message}`, ...args)
+};
+
 // PIXI를 전역 window에 노출시켜 Live2D 모델이 자동 업데이트되도록 함
 window.PIXI = PIXI;
 
@@ -44,7 +65,7 @@ const Live2DCanvas = ({ modelPath, emotion = "중립", backgroundImage }) => {
       // AnalyserNode의 frequencyBinCount 크기에 맞춰 Uint8Array 생성
       // frequencyBinCount는 fftSize의 절반
       dataArrayRef.current = new Uint8Array(analyserNode.frequencyBinCount);
-      console.log('[Live2DCanvas] AnalyserNode data array initialized with size:', analyserNode.frequencyBinCount);
+      logger.info('AnalyserNode data array initialized with size:', analyserNode.frequencyBinCount);
     }
   }, [analyserNode]); // analyserNode가 변경될 때 실행
 
@@ -67,7 +88,7 @@ const Live2DCanvas = ({ modelPath, emotion = "중립", backgroundImage }) => {
       // 모델에 표정 적용
       if (modelRef.current.internalModel) {
         // 표정 적용 시도
-        console.log(`[Live2DCanvas] 표정 변경: ${emotion} -> ${expressionName}`);
+        logger.info(`표정 변경: ${emotion} -> ${expressionName}`);
         
         // expressionManager 확인
         const expressionManager = modelRef.current.internalModel.motionManager?.expressionManager;
@@ -79,24 +100,24 @@ const Live2DCanvas = ({ modelPath, emotion = "중립", backgroundImage }) => {
             expressionManager.setExpression(expressionName);
             setCurrentExpression(expressionName);
           } catch (expError) {
-            console.error('[Live2DCanvas] 표정 적용 실패:', expError);
+            logger.error('표정 적용 실패:', expError);
             
             // 실패 시 첫 번째 표정 시도
             try {
               expressionManager.setExpression(0);
               setCurrentExpression(expressionName);
             } catch (expError2) {
-              console.error('[Live2DCanvas] 표정 적용 재시도 실패:', expError2);
+              logger.error('표정 적용 재시도 실패:', expError2);
             }
           }
         } else {
-          console.warn('[Live2DCanvas] 모델의 expressionManager가 초기화되지 않았습니다.');
+          logger.warn('모델의 expressionManager가 초기화되지 않았습니다.');
         }
       } else {
-        console.warn('[Live2DCanvas] 모델이 초기화되지 않았습니다.');
+        logger.warn('모델이 초기화되지 않았습니다.');
       }
     } catch (error) {
-      console.error('[Live2DCanvas] 표정 업데이트 오류:', error);
+      logger.error('표정 업데이트 오류:', error);
     }
   }, []);
 
@@ -139,9 +160,7 @@ const Live2DCanvas = ({ modelPath, emotion = "중립", backgroundImage }) => {
       currentLipSyncValueRef.current = currentLipSyncValueRef.current * smoothingFactor + valueToSet * (1 - smoothingFactor);
       valueToSet = currentLipSyncValueRef.current;
 
-      // 디버깅 로그 (필요시 활성화)
-      // console.log(`[Live2DCanvas][updateLipSync] RMS: ${rms.toFixed(4)}, Smoothed Value: ${valueToSet.toFixed(4)}`);
-
+      // 디버깅 로그 제거 (프로덕션 환경에서는 표시 안 함)
     } else {
        // 오디오 재생 중이 아닐 때는 스무딩 값도 0으로 초기화
        currentLipSyncValueRef.current = 0;
@@ -152,16 +171,11 @@ const Live2DCanvas = ({ modelPath, emotion = "중립", backgroundImage }) => {
       // 계산된 값으로 입 모양 파라미터 설정
       modelRef.current.internalModel.coreModel.setParameterValueById('ParamMouthOpenY', valueToSet);
 
-      // ParamMouthForm을 랜덤하게 설정 (-1 ~ 1) - 오디오 재생 중일 때는 랜덤, 멈추면 1
-      // const randomMouthFormValue = isAudioPlaying ? (Math.random() * 2) - 1 : 1;
-      // modelRef.current.internalModel.coreModel.setParameterValueById('ParamMouthForm', randomMouthFormValue);
-
       // ParamMouthForm 스무딩 적용
       const mouthFormSmoothingFactor = 0.2; // 스무딩 강도 (0~1, 작을수록 느림)
       let targetMouthFormValue;
       if (valueToSet >= 0.1) {
         // 목표 랜덤 값 생성 (-1 ~ 1)
-        // 매번 생성하기보다 일정 간격으로 목표값을 바꾸는 것도 고려 가능
         targetMouthFormValue = (Math.random() * 2) - 1;
       } else {
         // 오디오 멈추면 목표값 1
@@ -171,12 +185,9 @@ const Live2DCanvas = ({ modelPath, emotion = "중립", backgroundImage }) => {
       currentMouthFormValueRef.current = currentMouthFormValueRef.current * (1 - mouthFormSmoothingFactor) + targetMouthFormValue * mouthFormSmoothingFactor;
       modelRef.current.internalModel.coreModel.setParameterValueById('ParamMouthForm', currentMouthFormValueRef.current);
 
-      // 콘솔 로그 추가: 두 파라미터 값 출력
-    //   console.log({ ParamMouthOpenY: valueToSet.toFixed(4), ParamMouthForm: currentMouthFormValueRef.current.toFixed(4) });
-
     } catch (error) {
-      // 파라미터 설정 오류는 자주 발생할 수 있으므로, 에러 레벨을 낮추거나 필터링 고려
-      // console.error('립싱크 파라미터 업데이트 오류:', error);
+      // 파라미터 설정 오류는 자주 발생할 수 있으므로, verbose 레벨 로그로 설정
+      logger.verbose('립싱크 파라미터 업데이트 오류:', error);
     }
   }, [isAudioPlaying, analyserNode]); // isAudioPlaying, analyserNode 변경 시 함수 재생성
 
@@ -213,7 +224,7 @@ const Live2DCanvas = ({ modelPath, emotion = "중립", backgroundImage }) => {
         app.renderer.backgroundAlpha = 0;
         pixiAppRef.current = app;
     } else {
-        console.error("Container ref is not available to append PIXI view.");
+        logger.error("Container ref is not available to append PIXI view.");
         app.destroy(true, { removeView: true }); // 앱 정리
         return; // 조기 종료
     }
@@ -223,11 +234,11 @@ const Live2DCanvas = ({ modelPath, emotion = "중립", backgroundImage }) => {
         if (isModelLoaded || modelRef.current) return;
         if (!mounted) return;
 
-        console.log('모델 로드 시작:', modelPath);
+        logger.info('모델 로드 시작:', modelPath);
         isModelLoaded = true;
 
         if (!currentApp || !currentApp.renderer) {
-          console.error('PIXI 앱이 초기화되지 않았거나 제거됨 (로드 전)');
+          logger.error('PIXI 앱이 초기화되지 않았거나 제거됨 (로드 전)');
           isModelLoaded = false;
           return;
         }
@@ -235,20 +246,20 @@ const Live2DCanvas = ({ modelPath, emotion = "중립", backgroundImage }) => {
         const model = await Live2DModel.from(modelPath);
 
         if (!mounted) {
-          console.log('모델 로드 중단: 컴포넌트 언마운트됨 (로드 후)');
+          logger.debug('모델 로드 중단: 컴포넌트 언마운트됨 (로드 후)');
           if (model) model.destroy();
           isModelLoaded = false;
           return;
         }
         if (!pixiAppRef.current || !pixiAppRef.current.renderer) {
-            console.error('PIXI 앱이 제거됨 (로드 후)');
+            logger.error('PIXI 앱이 제거됨 (로드 후)');
             if (model) model.destroy();
             isModelLoaded = false;
             return;
         }
 
         if (!model) {
-          console.error('모델 로드 실패: 모델이 null입니다.');
+          logger.error('모델 로드 실패: 모델이 null입니다.');
           isModelLoaded = false;
           return;
         }
@@ -257,7 +268,7 @@ const Live2DCanvas = ({ modelPath, emotion = "중립", backgroundImage }) => {
           model.width = model.width || 500;
           model.height = model.height || 500;
         }
-        console.log('모델 크기:', model.width, model.height);
+        logger.debug('모델 크기:', model.width, model.height);
 
         // 모델 크기 조정 - 상반신만 보이도록 스케일 조정
         const scale = Math.min(
@@ -273,7 +284,7 @@ const Live2DCanvas = ({ modelPath, emotion = "중립", backgroundImage }) => {
 
         // --- Idle 모션 그룹 비활성화 유지 ---
         if (model.internalModel?.motionManager?.groups?.idle) {
-          console.log("[Debug] Disabling Idle motion group.");
+          logger.debug("Disabling Idle motion group.");
           model.internalModel.motionManager.groups.idle = undefined;
         }
         // ---------------------------------
@@ -288,21 +299,21 @@ const Live2DCanvas = ({ modelPath, emotion = "중립", backgroundImage }) => {
             // 초기 감정 적용
             updateExpression(currentEmotionRef.current);
         } else {
-            console.error("Cannot add model to stage, Pixi App or stage not available.");
+            logger.error("Cannot add model to stage, Pixi App or stage not available.");
             model.destroy(); // 생성된 모델 정리
             isModelLoaded = false;
             return;
         }
 
         // 모델 로드 직후 디버깅 정보 추가
-        console.log('모델 크기:', model.width, model.height);
+        logger.debug('모델 크기:', model.width, model.height);
         
         // 모델 객체 구조 살펴보기 (디버깅)
         try {
-          console.log('[Debug] 모델 객체 정보:');
-          console.log('- internalModel 존재:', !!model.internalModel);
-          console.log('- motionManager 존재:', !!model.internalModel?.motionManager);
-          console.log('- expressionManager 존재:', !!model.internalModel?.motionManager?.expressionManager);
+          logger.verbose('모델 객체 정보:');
+          logger.verbose('- internalModel 존재:', !!model.internalModel);
+          logger.verbose('- motionManager 존재:', !!model.internalModel?.motionManager);
+          logger.verbose('- expressionManager 존재:', !!model.internalModel?.motionManager?.expressionManager);
           
           // 표정 관련 속성 확인 - 간소화
           if (model.internalModel?.motionManager?.expressionManager) {
@@ -310,22 +321,22 @@ const Live2DCanvas = ({ modelPath, emotion = "중립", backgroundImage }) => {
             const hasExpressions = model.internalModel.motionManager.expressionManager.definitions.length > 0;
           }
         } catch (e) {
-          console.warn('[Debug] 모델 디버깅 정보 출력 중 오류:', e);
+          logger.warn('모델 디버깅 정보 출력 중 오류:', e);
         }
 
         // 모델 로드 성공 후 립싱크 파라미터 직접 설정
         const haruLipSyncParams = ['ParamMouthOpenY'];
-        console.log('[LipSync] 사용할 파라미터:', haruLipSyncParams);
+        logger.info('사용할 립싱크 파라미터:', haruLipSyncParams);
 
         // 모델 크기 로그 (기존 코드)
-        console.log('모델 크기:', model.width, model.height);
+        logger.debug('모델 크기:', model.width, model.height);
 
         // 기본 애니메이션 비활성화 (Idle 모션 그룹)
         try {
-          console.log('[Debug] Disabling Idle motion group.');
+          logger.debug('Disabling Idle motion group.');
           model.internalModel.motionManager.stopAllMotions();
         } catch (e) {
-          console.warn('Idle 모션 비활성화 오류:', e);
+          logger.warn('Idle 모션 비활성화 오류:', e);
         }
 
         // 표정 관련 로깅 간소화
@@ -334,14 +345,14 @@ const Live2DCanvas = ({ modelPath, emotion = "중립", backgroundImage }) => {
             // 기본 표정 설정
             updateExpression(currentEmotionRef.current);
           } else {
-            console.warn('[Live2DCanvas] 모델에 expressionManager가 없습니다.');
+            logger.warn('모델에 expressionManager가 없습니다.');
           }
         } catch (e) {
-          console.error('[Live2DCanvas] 표정 설정 오류:', e);
+          logger.error('표정 설정 오류:', e);
         }
 
       } catch (e) {
-        console.error('Live2D 모델 로드 중 오류 발생:', e);
+        logger.error('Live2D 모델 로드 중 오류 발생:', e);
         isModelLoaded = false;
       }
     };
@@ -397,14 +408,14 @@ const Live2DCanvas = ({ modelPath, emotion = "중립", backgroundImage }) => {
   // 애니메이션 루프 관리 useEffect (변경 없음)
   useEffect(() => {
     if (modelRef.current && pixiAppRef.current) {
-        console.log("[Debug] Starting animation loop.");
+        logger.debug("Starting animation loop.");
         if (animationFrameRef.current) {
             cancelAnimationFrame(animationFrameRef.current);
         }
         animationFrameRef.current = requestAnimationFrame(animate);
     }
     return () => {
-        console.log("[Debug] Stopping animation loop.");
+        logger.debug("Stopping animation loop.");
         if (animationFrameRef.current) {
             cancelAnimationFrame(animationFrameRef.current);
             animationFrameRef.current = null;

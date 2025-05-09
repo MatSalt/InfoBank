@@ -1,4 +1,8 @@
 import React, { createContext, useContext, useState, useRef, useCallback, useEffect } from 'react';
+import { createLogger } from '../utils/logger';
+
+// 로거 인스턴스 생성
+const logger = createLogger('AudioContext');
 
 // 컨텍스트 인터페이스 정의
 interface AudioContextType {
@@ -44,7 +48,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     try {
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
       if (!AudioContextClass) {
-        console.error('AudioContext is not supported in this browser.');
+        logger.error('AudioContext is not supported in this browser.');
         return;
       }
       // --- 중요: TTS 샘플링 레이트(24000Hz)에 맞춰 AudioContext 생성 ---
@@ -60,7 +64,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // source -> analyser -> destination 경로가 완성됨.
       if (localAudioContext && localAnalyserNode) {
           localAnalyserNode.connect(localAudioContext.destination);
-          console.log('[AudioContext] AnalyserNode connected to destination.');
+          logger.debug('AnalyserNode connected to destination.');
       }
       // *******************************************
 
@@ -72,27 +76,27 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setIsInitialized(true);
       // ***************************
 
-      console.log(`[AudioContext] AudioContext (Sample Rate: ${localAudioContext.sampleRate}Hz) and AnalyserNode initialized.`);
+      logger.info(`AudioContext (Sample Rate: ${localAudioContext.sampleRate}Hz) and AnalyserNode initialized.`);
     } catch (error) {
-      console.error('[AudioContext] Error initializing AudioContext:', error);
+      logger.error('Error initializing AudioContext:', error);
     }
 
     // Cleanup 함수
     return () => {
       if (localAudioContext && localAudioContext.state !== 'closed') {
-        localAudioContext.close().catch(console.error);
+        localAudioContext.close().catch(err => logger.error('Error closing AudioContext:', err));
         // Ref 초기화는 Provider 언마운트 시 자동 처리되므로 여기서 반드시 null로 설정할 필요는 없음
         // audioContextRef.current = null;
         // analyserNodeRef.current = null;
         setIsInitialized(false); // 언마운트 시 초기화 상태 false로
-        console.log('[AudioContext] AudioContext closed.');
+        logger.debug('AudioContext closed.');
       }
     };
   }, []); // 빈 배열 유지 (마운트 시 한 번 실행)
 
   // 오디오 처리 시작 알림 함수
   const processingAudio = useCallback(() => {
-	  console.log('[AudioContext] processingAudio called - Setting isAudioPlaying true');
+    logger.debug('processingAudio called - Setting isAudioPlaying true');
     // AnalyserNode가 활성화되도록 resume() 호출 (필요한 경우)
     if (audioContextRef.current?.state === 'suspended') {
         audioContextRef.current.resume();
@@ -102,7 +106,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // 오디오 데이터 정리 함수
   const clearAudio = useCallback(() => {
-    console.log('[AudioContext] clearAudio called - Setting isAudioPlaying false');
+    logger.debug('clearAudio called - Setting isAudioPlaying false');
     setIsAudioPlaying(false);
     // setAudioData(null); // 더 이상 사용 안 함
   }, []);
@@ -118,8 +122,8 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     clearAudio,
   };
 
-  // --- 추가된 로그 ---
-  console.log('[AudioProvider] Providing context value:', {
+  // --- 로그 레벨 조정 ---
+  logger.debug('Providing context value:', {
       isAudioPlaying,
       analyserNode: !!analyserNodeRef.current, // 실제 노드 대신 존재 여부만 로깅
       audioContext: !!audioContextRef.current, // 실제 컨텍스트 대신 존재 여부만 로깅
