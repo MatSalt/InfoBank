@@ -45,13 +45,6 @@ const VoiceChatWithLive2D: React.FC = () => {
       <div className="w-full md:w-1/2 h-[50vh] md:h-screen flex items-center justify-center p-4 relative">
         <div className="w-full h-full max-w-xl max-h-xl bg-white/50 rounded-xl shadow-lg overflow-hidden">
           <Live2DAvatar audioData={lastAudioData} emotion={currentEmotion} />
-          
-          {/* 상태 오버레이 */}
-          {isResponseProcessing && (
-            <div className="absolute top-4 right-4 bg-red-500 text-white px-3 py-1 rounded-full text-sm animate-pulse">
-              AI 응답 중...
-            </div>
-          )}
         </div>
       </div>
 
@@ -61,28 +54,34 @@ const VoiceChatWithLive2D: React.FC = () => {
           <h1 className="text-2xl font-bold mb-4 text-center text-gray-800">AI 음성 대화</h1>
           
           {/* 오디오 입력 상태 표시 */}
-          <div className={`relative mx-auto w-20 h-20 rounded-full flex items-center justify-center mb-4 transition-all duration-300
-            ${isResponseProcessing 
-              ? 'bg-red-100 border-2 border-red-400' 
-              : isRecording 
+          <div className="flex justify-center space-x-8 mb-4">
+            {/* 마이크 상태 아이콘 - 항상 활성화 상태로 표시 */}
+            <div className={`relative w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300
+              ${isRecording 
                 ? 'bg-green-100 border-2 border-green-500 animate-pulse' 
-                : 'bg-gray-100 border-2 border-gray-300'}`}>
-            
-            {/* 오디오 입력 아이콘 */}
-            <svg 
-              className={`w-10 h-10 transition-all duration-300 ${isResponseProcessing ? 'text-red-500' : isRecording ? 'text-green-600' : 'text-gray-500'}`} 
-              fill="none" 
-              stroke="currentColor" 
-              viewBox="0 0 24 24" 
-              xmlns="http://www.w3.org/2000/svg">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-            </svg>
-            
-            {/* 응답 처리 중일 때 X 표시 */}
+                : 'bg-blue-50 border-2 border-blue-300'}`}>
+              
+              {/* 마이크 아이콘 - 항상 활성화된 색상으로 표시 */}
+              <svg 
+                className={`w-10 h-10 transition-all duration-300 ${isRecording ? 'text-green-600' : 'text-blue-500'}`} 
+                fill="none" 
+                stroke="currentColor" 
+                viewBox="0 0 24 24" 
+                xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+              </svg>
+            </div>
+
+            {/* AI 응답 상태 아이콘 - 응답 처리 중일 때만 표시 */}
             {isResponseProcessing && (
-              <div className="absolute inset-0 flex items-center justify-center">
-                <svg className="w-16 h-16 text-red-500 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" />
+              <div className="relative w-20 h-20 rounded-full flex items-center justify-center bg-red-100 border-2 border-red-400 animate-pulse">
+                <svg 
+                  className="w-10 h-10 text-red-500" 
+                  fill="none" 
+                  stroke="currentColor" 
+                  viewBox="0 0 24 24" 
+                  xmlns="http://www.w3.org/2000/svg">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15.536a5 5 0 001.414 1.414m2.828-4.242a1 1 0 011.414 0 1 1 0 010 1.414m0 0l-2.828 2.828m0 0a3 3 0 01-4.243 0 3 3 0 010-4.243" />
                 </svg>
               </div>
             )}
@@ -90,7 +89,9 @@ const VoiceChatWithLive2D: React.FC = () => {
           
           {/* 상태 메시지 */}
           <p className={`text-center font-medium mb-4 ${isResponseProcessing ? 'text-red-600' : isRecording ? 'text-green-600' : 'text-gray-600'}`}>
-            {isResponseProcessing ? responseStatusMessage : statusMessage}
+            {isResponseProcessing 
+              ? '🔊 ' + responseStatusMessage 
+              : statusMessage}
           </p>
           
           {/* 현재 감정 상태 표시 */}
@@ -119,14 +120,14 @@ const VoiceChatWithLive2D: React.FC = () => {
           {/* 시작/중지 버튼 */}
           <button
             onClick={isRecording ? stopRecording : startRecording}
-            disabled={!isSupported || isConnecting || isResponseProcessing}
+            disabled={!isSupported || isConnecting}
             className={`w-full px-6 py-4 rounded-lg text-white font-semibold shadow-md transition-all duration-300 ease-in-out ${
               isRecording
                 ? 'bg-red-500 hover:bg-red-600 animate-pulse' 
                 : 'bg-purple-600 hover:bg-purple-700'
-            } ${(!isSupported || isConnecting || isResponseProcessing) ? 'opacity-50 cursor-not-allowed' : ''}`}
+            } ${(!isSupported || isConnecting) ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
-            {isRecording ? '🔴 대화 중지' : (isConnecting ? '연결 중...' : (isResponseProcessing ? '처리 중...' : '🎤 대화 시작'))}
+            {isRecording ? '🔴 대화 중지' : (isConnecting ? '연결 중...' : '🎤 대화 시작')}
           </button>
           
           {/* 인식된 텍스트 */}
