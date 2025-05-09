@@ -52,17 +52,6 @@ const VoiceChatWithLive2D: React.FC = () => {
               AI 응답 중...
             </div>
           )}
-          {isRecording && !isMicDisabled && (
-            <div className="absolute top-4 right-4 bg-green-500 text-white px-3 py-1 rounded-full text-sm animate-pulse">
-              녹음 중...
-            </div>
-          )}
-          
-          {/* 감정 상태 표시 */}
-          <div className="absolute bottom-4 left-4 bg-white/80 text-gray-800 px-4 py-2 rounded-lg text-sm font-medium shadow-md">
-            <span className="text-xl mr-2">{emotionEmoji}</span>
-            <span>{currentEmotion}</span>
-          </div>
         </div>
       </div>
 
