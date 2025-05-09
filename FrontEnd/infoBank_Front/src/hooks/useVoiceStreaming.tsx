@@ -1,49 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-// import axios from 'axios'; // 사용하지 않으므로 제거
 import { useAudio } from '../contexts/AudioContext';
-
-// 사용하지 않으므로 제거
-// interface AudioChunk {
-//   type: 'audio';
-//   data: string; // Base64 encoded audio data
-// }
+import { UseVoiceStreamingReturn } from '../types/voiceStreamingTypes';
+import { convertFloat32ToPCM, ensureAudioContextReady } from '../utils/audioUtils';
+import { parseWebSocketMessage, processEmotionResult, isInterruptionSignal, processResponseStatus } from '../utils/webSocketUtils';
 
 // WebSocket 연결 주소를 환경 변수에서 가져옴
 const WEBSOCKET_URL = import.meta.env.VITE_BACKEND_WS_URL;
 
-// WebSocket 서버로부터 받을 것으로 예상되는 데이터 구조 인터페이스
-interface WebSocketResponse {
-  transcript?: string;
-  is_final?: boolean;
-  error?: string; // 백엔드 에러 메시지 필드 (선택 사항)
-  control?: string;
-  action?: string;
-  reason?: string;
-  message?: string;
-  status?: string;
-  type?: string;      // 메시지 타입 (추가)
-  emotion?: string;   // 감정 분석 결과 (추가)
-}
-
-// 커스텀 훅의 반환 타입 인터페이스
-interface UseVoiceStreamingReturn {
-  isRecording: boolean;
-  statusMessage: string;
-  errorMessage: string;
-  isSupported: boolean;
-  isConnecting: boolean;
-  transcript: string;
-  startRecording: () => Promise<void>;
-  stopRecording: () => void;
-  isResponseProcessing: boolean;
-  responseStatusMessage: string;
-  processingTime: number | null;
-  isPlayingAudio: boolean;
-  lastAudioData: Float32Array | null;
-  currentEmotion: string; // 현재 감정 상태 (추가)
-}
-
-// 전역 Window 인터페이스 확장
+// 전역 Window 인터페이스 확장 (직접 선언)
 declare global {
   interface Window {
     webkitAudioContext?: typeof AudioContext;
@@ -51,22 +15,22 @@ declare global {
 }
 
 /**
- * AI 음성 대화 스트리밍을 위한 커스텀 훅 (TypeScript)
+ * AI 음성 대화 스트리밍을 위한 커스텀 훅
  * @returns {UseVoiceStreamingReturn} 음성 스트리밍 관련 상태 및 제어 함수
  */
 export function useVoiceStreaming(): UseVoiceStreamingReturn {
   // isInitialized 가져오기
   const { processingAudio, clearAudio, analyserNode, audioContext, isInitialized } = useAudio();
 
-  // 기존 로그 제거 또는 수정
+  // 로그
   console.log('[useVoiceStreaming] Context status:', {
     isInitialized,
-    isAudioPlaying: useAudio().isAudioPlaying, // isAudioPlaying은 state이므로 매번 최신 값 확인
+    isAudioPlaying: useAudio().isAudioPlaying,
     analyserNode: !!analyserNode,
     audioContext: !!audioContext
   });
 
-  // 상태 변수들 (타입 명시)
+  // 상태 변수들
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const [statusMessage, setStatusMessage] = useState<string>('버튼을 누르고 말씀하세요.');
   const [errorMessage, setErrorMessage] = useState<string>('');
@@ -78,27 +42,21 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
   const [processingTime, setProcessingTime] = useState<number | null>(null);
   const [isPlayingAudio, setIsPlayingAudio] = useState<boolean>(false);
   const [lastAudioData, setLastAudioData] = useState<Float32Array | null>(null);
-  const [currentEmotion, setCurrentEmotion] = useState<string>("중립"); // 감정 상태 추가
+  const [currentEmotion, setCurrentEmotion] = useState<string>("중립");
 
-  // useRef (타입 명시, 초기값 null)
+  // useRef
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const webSocketRef = useRef<WebSocket | null>(null);
   const audioStreamRef = useRef<MediaStream | null>(null);
   const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const audioQueueRef = useRef<Uint8Array[]>([]);
   const isPlayingRef = useRef<boolean>(false);
-
-  // 응답 처리 활성화 대기 플래그 추가
   const pendingResponseEnableRef = useRef<boolean>(false);
   const pendingResponseMessageRef = useRef<string>('');
-
-  // 추가할 상태 변수들
   const responseStartTimeRef = useRef<number | null>(null);
   const isFirstAudioChunkRef = useRef<boolean>(true);
-
-  // 음성 스트리밍 훅 내부에 useRef 추가
   const activeSourceNodes = useRef<AudioBufferSourceNode[]>([]);
-
+  
   // 브라우저 지원 여부 확인
   useEffect(() => {
     setIsSupported(!!(navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function' && window.WebSocket));
@@ -278,14 +236,9 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
     }
 
     // AudioContext 상태 확인 및 재개
-    if (audioContext.state === 'suspended') {
-      try {
-        await audioContext.resume();
-        console.log("AudioContext resumed.");
-      } catch (err) {
-        console.error("AudioContext resume 실패:", err);
-        return Promise.reject('Failed to resume AudioContext');
-      }
+    const isReady = await ensureAudioContextReady(audioContext);
+    if (!isReady) {
+      return Promise.reject('Failed to resume AudioContext');
     }
 
     return new Promise((resolve, reject) => {
@@ -458,98 +411,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
       };
 
       // 메시지 수신 처리
-      ws.onmessage = (event: MessageEvent) => {
-        // 서버에서 텍스트(JSON) 또는 바이너리 데이터를 보낼 수 있으므로 타입 확인
-        if (typeof event.data === 'string') {
-          console.log('WebSocket 텍스트 메시지 수신:', event.data);
-          try {
-            const data = JSON.parse(event.data) as WebSocketResponse;
-
-            // 감정 분석 결과 처리
-            if (data.type === "emotion_result" && data.emotion) {
-              console.log(`[useVoiceStreaming] 감정 분석 결과 수신: ${data.emotion}`);
-              setCurrentEmotion(data.emotion);
-            }
-
-            // 인터럽션 처리 로직
-            if (data.control === 'interruption') {
-              handleInterruption();
-              return;
-            }
-
-            // 응답 상태 메시지 처리
-            else if (data.control === 'response_status') {
-              if (data.action === 'start_processing') {
-                // 응답 처리 시작 시간 기록
-                responseStartTimeRef.current = Date.now();
-                isFirstAudioChunkRef.current = true;
-                
-                // 상태 메시지 업데이트
-                setResponseStatusMessage(data.message || 'AI가 응답 중입니다...');
-                setStatusMessage(data.message || 'AI가 응답 중입니다...');
-                
-                // UI 상태 설정
-                setIsResponseProcessing(true);
-              } else if (data.action === 'end_processing') {
-                // 응답 처리 종료
-                pendingResponseEnableRef.current = true;
-                pendingResponseMessageRef.current = data.message || '말씀하세요...';
-                
-                // 오디오 큐가 비어있는 경우에만 즉시 상태 업데이트
-                if (audioQueueRef.current.length === 0 && !isPlayingRef.current) {
-                  enableResponseProcessing(pendingResponseMessageRef.current);
-                } else {
-                  console.log(`아직 ${audioQueueRef.current.length}개의 오디오가 큐에 있고, 재생 중 상태: ${isPlayingRef.current}`);
-                }
-              }
-            }
-
-            // 기타 텍스트 기반 메시지 처리
-            if (data.transcript) {
-              setTranscript(prev => prev + data.transcript);
-              setStatusMessage('텍스트 수신 중...');
-            }
-            
-            if (data.is_final) {
-              setStatusMessage('최종 결과 수신.');
-            }
-            
-            if (data.error) {
-              console.error("WebSocket message error:", data.error);
-              setErrorMessage(`서버 오류: ${data.error}`);
-              stopRecording();
-            }
-          } catch (e) {
-            console.error('JSON 파싱 오류:', e);
-          }
-        } else if (event.data instanceof ArrayBuffer) {
-          // 서버에서 오디오 데이터를 보낸 경우의 처리 (TTS 결과 재생)
-          console.log('WebSocket 바이너리 메시지 수신:', event.data.byteLength, 'bytes');
-
-          // 오디오 데이터를 큐에 추가
-          const audioData = new Uint8Array(event.data);
-          audioQueueRef.current.push(audioData);
-
-          // 오디오 큐 처리 시작
-          processAudioQueue();
-        } else if (event.data instanceof Blob) {
-          // Blob 데이터를 ArrayBuffer로 변환하여 처리
-          event.data.arrayBuffer().then(buffer => {
-            console.log('WebSocket Blob 메시지 수신:', buffer.byteLength, 'bytes');
-
-            // 오디오 데이터를 큐에 추가
-            const audioData = new Uint8Array(buffer);
-            audioQueueRef.current.push(audioData);
-
-            // 오디오 큐 처리 시작
-            processAudioQueue();
-          }).catch(error => {
-            console.error('Blob 처리 중 오류 발생:', error);
-          });
-        } else {
-          console.warn("알 수 없는 메시지 타입 수신:", event.data);
-        }
-      };
+      ws.onmessage = handleWebSocketMessage;
 
       // 오류 처리
       ws.onerror = (event: Event) => {
@@ -575,6 +437,100 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
       };
     });
   }, [stopAudioStream, processAudioQueue, stopRecording, enableResponseProcessing, handleInterruption]);
+
+  // WebSocket 메시지 처리 함수
+  const handleWebSocketMessage = useCallback((event: MessageEvent) => {
+    // 서버에서 텍스트(JSON) 또는 바이너리 데이터를 보낼 수 있으므로 타입 확인
+    if (typeof event.data === 'string') {
+      console.log('WebSocket 텍스트 메시지 수신:', event.data);
+      try {
+        const data = parseWebSocketMessage(event.data);
+        if (!data) return;
+
+        // 감정 분석 결과 처리
+        const emotion = processEmotionResult(data);
+        if (emotion) {
+          setCurrentEmotion(emotion);
+        }
+
+        // 인터럽션 처리
+        if (isInterruptionSignal(data)) {
+          handleInterruption();
+          return;
+        }
+
+        // 응답 상태 메시지 처리
+        const responseStatus = processResponseStatus(data);
+        if (responseStatus.isStartProcessing) {
+          // 응답 처리 시작 시간 기록
+          responseStartTimeRef.current = Date.now();
+          isFirstAudioChunkRef.current = true;
+          
+          // 상태 메시지 업데이트
+          setResponseStatusMessage(responseStatus.message);
+          setStatusMessage(responseStatus.message);
+          
+          // UI 상태 설정
+          setIsResponseProcessing(true);
+        } else if (responseStatus.isEndProcessing) {
+          // 응답 처리 종료
+          pendingResponseEnableRef.current = true;
+          pendingResponseMessageRef.current = responseStatus.message;
+          
+          // 오디오 큐가 비어있는 경우에만 즉시 상태 업데이트
+          if (audioQueueRef.current.length === 0 && !isPlayingRef.current) {
+            enableResponseProcessing(pendingResponseMessageRef.current);
+          } else {
+            console.log(`아직 ${audioQueueRef.current.length}개의 오디오가 큐에 있고, 재생 중 상태: ${isPlayingRef.current}`);
+          }
+        }
+
+        // 기타 텍스트 기반 메시지 처리
+        if (data.transcript) {
+          setTranscript(prev => prev + data.transcript);
+          setStatusMessage('텍스트 수신 중...');
+        }
+        
+        if (data.is_final) {
+          setStatusMessage('최종 결과 수신.');
+        }
+        
+        if (data.error) {
+          console.error("WebSocket message error:", data.error);
+          setErrorMessage(`서버 오류: ${data.error}`);
+          stopRecording();
+        }
+      } catch (e) {
+        console.error('JSON 파싱 오류:', e);
+      }
+    } else if (event.data instanceof ArrayBuffer) {
+      // 서버에서 오디오 데이터를 보낸 경우의 처리 (TTS 결과 재생)
+      console.log('WebSocket 바이너리 메시지 수신:', event.data.byteLength, 'bytes');
+
+      // 오디오 데이터를 큐에 추가
+      const audioData = new Uint8Array(event.data);
+      audioQueueRef.current.push(audioData);
+
+      // 오디오 큐 처리 시작
+      processAudioQueue();
+    } else if (event.data instanceof Blob) {
+      // Blob 데이터를 ArrayBuffer로 변환하여 처리
+      event.data.arrayBuffer().then(buffer => {
+        console.log('WebSocket Blob 메시지 수신:', buffer.byteLength, 'bytes');
+
+        // 오디오 데이터를 큐에 추가
+        const audioData = new Uint8Array(buffer);
+        audioQueueRef.current.push(audioData);
+
+        // 오디오 큐 처리 시작
+        processAudioQueue();
+      }).catch(error => {
+        console.error('Blob 처리 중 오류 발생:', error);
+      });
+    } else {
+      console.warn("알 수 없는 메시지 타입 수신:", event.data);
+    }
+  }, [handleInterruption, processAudioQueue, stopRecording, enableResponseProcessing]);
 
   // MediaRecorder 설정 및 스트리밍 시작 함수
   const setupAndStartStreaming = useCallback(async (): Promise<boolean> => {
@@ -630,10 +586,7 @@ export function useVoiceStreaming(): UseVoiceStreamingReturn {
       recordingProcessor.onaudioprocess = (e) => {
         if (webSocketRef.current?.readyState === WebSocket.OPEN) {
           const inputData = e.inputBuffer.getChannelData(0);
-          const pcmData = new Int16Array(inputData.length);
-          for (let i = 0; i < inputData.length; i++) {
-            pcmData[i] = Math.max(-32768, Math.min(32767, Math.floor(inputData[i] * 32767)));
-          }
+          const pcmData = convertFloat32ToPCM(inputData);
           webSocketRef.current.send(pcmData.buffer);
         }
       };
