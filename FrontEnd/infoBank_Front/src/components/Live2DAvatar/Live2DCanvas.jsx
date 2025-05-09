@@ -22,7 +22,7 @@ const EMOTION_TO_EXPRESSION = {
   "귀찮음": "F08"     // 싫증과 동일
 };
 
-const Live2DCanvas = ({ modelPath, emotion = "중립" }) => {
+const Live2DCanvas = ({ modelPath, emotion = "중립", backgroundImage }) => {
   const containerRef = useRef(null);
   const pixiAppRef = useRef(null);
   const modelRef = useRef(null);
@@ -195,6 +195,8 @@ const Live2DCanvas = ({ modelPath, emotion = "중립" }) => {
       width: containerRef.current.clientWidth,
       height: containerRef.current.clientHeight,
       backgroundColor: 0x00000000, // 투명 배경
+      transparent: true, // 투명도 활성화
+      clearBeforeRender: true, // 렌더링 전 화면 지우기
       autoStart: true,
       antialias: true
     });
@@ -204,6 +206,11 @@ const Live2DCanvas = ({ modelPath, emotion = "중립" }) => {
         containerRef.current.appendChild(app.view);
         app.view.style.width = '100%';
         app.view.style.height = '100%';
+        app.renderer.view.style.position = 'absolute'; // 위치 설정
+        app.renderer.view.style.display = 'block'; // 블록 표시로 설정
+        // 렌더러 투명도 설정 추가
+        app.renderer.backgroundColor = 0x000000;
+        app.renderer.backgroundAlpha = 0;
         pixiAppRef.current = app;
     } else {
         console.error("Container ref is not available to append PIXI view.");
@@ -272,6 +279,8 @@ const Live2DCanvas = ({ modelPath, emotion = "중립" }) => {
 
         // 스테이지에 추가 전에 앱 유효성 재확인
         if (pixiAppRef.current && pixiAppRef.current.stage) {
+            // 스테이지 배경 투명하게 설정
+            pixiAppRef.current.stage.alpha = 1;
             pixiAppRef.current.stage.addChild(model);
             modelRef.current = model;
             
@@ -408,7 +417,11 @@ const Live2DCanvas = ({ modelPath, emotion = "중립" }) => {
         width: '100%',
         height: '100%',
         overflow: 'hidden',
-        position: 'relative'
+        position: 'relative',
+        backgroundImage: backgroundImage ? `url(${backgroundImage})` : 'none',
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat'
       }}
     />
   );
