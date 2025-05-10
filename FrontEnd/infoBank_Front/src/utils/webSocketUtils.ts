@@ -1,4 +1,4 @@
-import { WebSocketResponse } from '../types/voiceStreamingTypes';
+import { WebSocketResponse } from '../types/voiceConversationTypes';
 import { createLogger } from './logger';
 
 // 로거 인스턴스 생성
