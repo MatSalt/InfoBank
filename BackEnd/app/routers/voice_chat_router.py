@@ -1,4 +1,18 @@
-# backend/app/routers/voice.py
+# backend/app/routers/voice_chat_router.py
+"""
+WebSocket 기반 음성 채팅 라우터 모듈.
+
+이 모듈은 음성 대화를 위한 WebSocket 엔드포인트와 해당 처리 파이프라인을 제공합니다.
+주요 처리 흐름:
+1. 클라이언트로부터 오디오 데이터 수신
+2. STT(Speech-to-Text)를 통한 텍스트 변환
+3. LLM을 사용한 응답 생성
+4. 감정 분석 처리
+5. TTS(Text-to-Speech)를 통한 음성 응답 생성
+6. 클라이언트에 오디오 응답 스트리밍
+
+이 모듈은 WebSocket 연결 관리, 오류 처리, 리소스 정리 등을 담당합니다.
+"""
 import logging
 import asyncio
 import re # 정규식 임포트 (현재 로직에서는 필수는 아니지만 향후 사용을 위해)
@@ -32,8 +46,21 @@ router = APIRouter(
 
 @router.websocket("/audio")
 async def websocket_endpoint(websocket: WebSocket):
-    """
-    WebSocket 연결을 처리하고, 오디오 수신 -> STT -> LLM -> 텍스트 청킹 -> TTS -> 오디오 전송 파이프라인을 관리합니다.
+    """WebSocket 연결을 통한 음성 대화 파이프라인을 관리합니다.
+    
+    클라이언트와 WebSocket 연결을 수립하고, 양방향 오디오 스트리밍 처리를 담당합니다.
+    오디오 데이터는 STT로 변환되고, 텍스트 응답을 생성한 후, 다시 TTS를 통해
+    음성으로 변환하여 클라이언트에게 전송합니다.
+    
+    Args:
+        websocket (WebSocket): FastAPI WebSocket 연결 객체
+    
+    Note:
+        이 함수는 다음 단계를 수행합니다:
+        1. WebSocket 연결 수락 및 초기화
+        2. 오디오 큐 및 관련 태스크 생성
+        3. 메시지 수신 루프 실행
+        4. 예외 처리 및 연결 종료 시 리소스 정리
     """
     await websocket.accept()
     client_host = websocket.client.host
@@ -56,7 +83,25 @@ async def websocket_endpoint(websocket: WebSocket):
 
     # --- STT 결과 처리 콜백 ---
     async def process_stt_result(transcript: str, is_final: bool, speech_event=None):
-        """STT 결과 또는 음성 활동 이벤트를 처리합니다."""
+        """STT 결과 또는 음성 이벤트를 처리합니다.
+        
+        STT 엔진으로부터 텍스트 결과를 받거나 다양한 음성 관련 이벤트를 처리합니다.
+        텍스트 결과와 음성 이벤트 모두 처리 가능하며, 이벤트 타입에 따라 적절한 
+        처리를 수행합니다.
+        
+        Args:
+            transcript (str): STT로 변환된 텍스트. 이벤트인 경우 None일 수 있음
+            is_final (bool): 텍스트 결과가 최종 결과인지 여부
+            speech_event (dict, optional): 특별한 음성 관련 이벤트 정보. 기본값은 None
+            
+        Note:
+            처리되는 이벤트 타입:
+            - INTERRUPTION_SIGNAL: 사용자 인터럽션 감지
+            - STT_RECONNECTING: STT 서비스 재연결 중
+            - STT_RECONNECTED: STT 서비스 재연결 성공
+            - STT_RECONNECTION_FAILED: STT 서비스 재연결 실패
+            - STT_ERROR: STT 서비스 오류
+        """
         nonlocal is_connected, llm_tts_tasks
         
         if not is_connected:
@@ -244,6 +289,16 @@ async def websocket_endpoint(websocket: WebSocket):
     except Exception as e:
         logger.error(f"[{client_info}] WebSocket 핸들러 중 오류: {e}", exc_info=True)
     finally:
+        """
+        리소스 정리 단계
+        
+        다음 리소스들이 정리됩니다:
+        1. 연결 상태 플래그
+        2. STT 태스크
+        3. LLM/TTS 태스크
+        4. 사용자 채팅 세션
+        5. WebSocket 연결
+        """
         # 연결 상태 업데이트
         is_connected = False
         
