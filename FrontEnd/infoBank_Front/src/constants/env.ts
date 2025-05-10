@@ -6,7 +6,7 @@
  */
 
 // 백엔드 URL 기본값 (Cloud Run에 배포된 URL)
-const DEFAULT_BACKEND_URL = 'infobank-server-1039193476160.asia-northeast3.run.app';
+const DEFAULT_BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'localhost:8000';
 
 // WebSocket URL (Cloud Run은 HTTPS를 사용하므로 WSS 프로토콜을 사용)
 export const WS_URL = import.meta.env.VITE_BACKEND_WS_URL || 
