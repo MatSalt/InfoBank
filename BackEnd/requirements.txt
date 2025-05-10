@@ -1,4 +1,4 @@
-fastapi==0.115.12
+fastapi==0.115.9
 uvicorn==0.34.1
 pydantic==2.11.3
 pydantic-settings==2.8.1
@@ -18,7 +18,7 @@ google-cloud-aiplatform==1.89.0
 google-genai==1.11.0
 aiofiles==23.2.1
 httpx==0.28.1
-starlette==0.46.2
+starlette==0.45.3
 gunicorn==21.2.0
 pytest==7.4.3
 requests==2.32.3
