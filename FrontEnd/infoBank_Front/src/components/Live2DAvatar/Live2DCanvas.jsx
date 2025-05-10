@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as PIXI from 'pixi.js';
 import { Live2DModel } from 'pixi-live2d-display';
-// import { LiveAudioProcessor } from '../../utils/LiveAudioProcessor'; // 제거
 import { useAudio } from '../../contexts/AudioContext';
 
 // 로거 생성 (JS 파일에서 사용하는 간단한 로거)
